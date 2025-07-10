@@ -10,6 +10,7 @@ from fastapi import HTTPException
 from app.utils.planilha import baixar_e_processar_planilha
 from app.utils.browser_utils import iniciar_navegador, executar_javascript_seguro
 from app.utils.file_utils import criar_diretorio_temporario, remover_diretorio
+from app.utils.performance_tracker import TimerContext
 import logging
 import time
 from typing import List, Dict, Any, Tuple, Callable, Optional
@@ -268,24 +269,36 @@ class TransparenciaScraper:
         logger.info(f"Iniciando scraper para ano={ano}, mes_inicio={mes_inicio}, mes_fim={mes_fim}")
         
         try:
-            self._iniciar_navegador()
+            with TimerContext("iniciar_navegador") as timer_navegador:
+                self._iniciar_navegador()
             
-            # Acessa a URL de consulta
-            url = "https://www.transparencia.pr.gov.br/pte/assunto/4/22?origem=3"
-            logger.info(f"Acessando URL: {url}")
-            self.driver.get(url)
-            time.sleep(5)  # Aguarda carregar
+            with TimerContext("acessar_url") as timer_url:
+                # Acessa a URL de consulta
+                url = "https://www.transparencia.pr.gov.br/pte/assunto/4/22?origem=3"
+                logger.info(f"Acessando URL: {url}")
+                self.driver.get(url)
+                time.sleep(5)  # Aguarda carregar
             
-            # Preenche o formulário com os parâmetros
-            self._preencher_formulario(ano, mes_inicio, mes_fim)
+            with TimerContext("preencher_formulario") as timer_formulario:
+                # Preenche o formulário com os parâmetros
+                self._preencher_formulario(ano, mes_inicio, mes_fim)
             
-            # Clica no botão de pesquisa
-            self._clicar_botao_pesquisa()
+            with TimerContext("clicar_botao_pesquisa") as timer_pesquisa:
+                # Clica no botão de pesquisa
+                self._clicar_botao_pesquisa()
             
-            # Baixa e processa a planilha
-            logger.info("Iniciando download e processamento da planilha...")
-            dados = baixar_e_processar_planilha(self.driver, self.download_dir)
-            logger.info(f"Processamento concluído, {len(dados) if dados else 0} registros obtidos")
+            with TimerContext("baixar_processar_planilha") as timer_planilha:
+                # Baixa e processa a planilha
+                logger.info("Iniciando download e processamento da planilha...")
+                dados = baixar_e_processar_planilha(self.driver, self.download_dir)
+                logger.info(f"Processamento concluído, {len(dados) if dados else 0} registros obtidos")
+            
+            # Log detalhado dos tempos
+            logger.info(f"Tempos de execução - Navegador: {timer_navegador.get_duration():.2f}s, "
+                       f"URL: {timer_url.get_duration():.2f}s, "
+                       f"Formulário: {timer_formulario.get_duration():.2f}s, "
+                       f"Pesquisa: {timer_pesquisa.get_duration():.2f}s, "
+                       f"Planilha: {timer_planilha.get_duration():.2f}s")
             
             return dados
             

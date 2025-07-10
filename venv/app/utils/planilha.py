@@ -120,9 +120,17 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
             for col in df.columns
         ]
         
+        df = corrigir_colunas(df)
+        logger.debug("Colunas normalizadas e corrigidas")
+        
+        if len(df) > 0:
+            df = df.drop(0)       
         # Substitui valores não compatíveis com JSON
         df = df.replace([float('inf'), float('-inf'), pd.NA, pd.NaT], np.nan)
         
+        # Retirar os dados cuja unidade orcamentaria é tecpar, gestão e fundo paraná
+        df = df[~df['UNIDADE_ORÇAMENTÁRIA'].str.contains("45.70 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / INSTITUTO DE TECNOLOGIA DO PARANÁ – TECPAR|45.04 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / GESTÃO ADMINISTRATIVA|45.60 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / FUNDO PARANÁ", na=False)]
+
         # Converte para lista de dicionários
         registros = df.to_dict(orient='records')
         
@@ -156,3 +164,46 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
     except Exception as e:
         logger.error(f"Erro ao baixar ou processar planilha: {e}", exc_info=True)
         return None
+
+def corrigir_colunas(df):
+    """
+    Corrige nomes de colunas tratando subheaders:
+    - Substitui colunas "unnamed" com subheader "NO MÊS" pelo nome da coluna anterior + "_no_mes"
+    - Adiciona "_ate_mes" nas colunas com subheader "ATÉ MÊS"
+    - Converte todos os nomes para maiúsculas
+    """
+    nova_estrutura = {}
+    coluna_anterior = None
+    
+    # Primeiro, extrair os nomes das colunas e seus valores de subheader
+    colunas = df.columns.tolist()
+    subheaders = df.iloc[0].tolist() if len(df) > 0 else [None] * len(colunas)
+    
+    # Mapear para o novo formato
+    for i, (coluna, subheader) in enumerate(zip(colunas, subheaders)):
+        # Verificar se é uma coluna unnamed
+        if 'unnamed' in str(coluna).lower():
+            novo_nome = f"{coluna_anterior}_no_mes"
+            nova_estrutura[coluna] = novo_nome
+        else:
+            # Tratamento especial para a coluna "pago_(r$)"
+            if "pago_(r$)" in str(coluna).lower() and "no_mes" not in str(coluna).lower():
+                novo_nome = f"{coluna}_ate_mes"
+                nova_estrutura[coluna] = novo_nome
+            # Para colunas nomeadas com "ATÉ MÊS", adicionar sufixo
+            elif isinstance(subheader, str) and subheader == 'ATÉ MÊS':
+                novo_nome = f"{coluna}_ate_mes"
+                nova_estrutura[coluna] = novo_nome
+            else:
+                nova_estrutura[coluna] = coluna
+            
+            # Armazenar nome da coluna para uso com unnamed seguintes
+            coluna_anterior = coluna
+    
+    # Renomear colunas no DataFrame
+    df = df.rename(columns=nova_estrutura)
+    
+    # Converter todos os nomes para maiúsculas
+    df.columns = [str(col).upper() for col in df.columns]
+    
+    return df
