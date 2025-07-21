@@ -1,5 +1,6 @@
 from fastapi import FastAPI
 from app.Routes.routes import router as consulta
+from app.Routes.routes_playwright import router as consulta_playwright
 from app.Core.logging import configure_logging
 
 # Configuração inicial
@@ -8,12 +9,13 @@ configure_logging()
 # Criação da aplicação
 app = FastAPI(
     title="API Crawler Transparência PR",
-    description="API para consulta de dados do Portal da Transparência do Paraná",
+    description="API para consulta de dados do Portal da Transparência do Paraná com Selenium e Playwright",
     version="1.0.0"
 )
 
 # Registro de rotas
-app.include_router(consulta, tags=["Consultas"])
+app.include_router(consulta, tags=["Consultas Selenium"])
+app.include_router(consulta_playwright, tags=["Consultas Playwright"])
 
 if __name__ == "__main__":
     import uvicorn

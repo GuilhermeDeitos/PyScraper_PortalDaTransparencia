@@ -321,3 +321,56 @@ timestamp,endpoint,operation,ano_inicio,ano_fim,mes_inicio,mes_fim,tempo_total_s
 2025-07-09T10:30:26.402415,/consultar,consulta_assincrona_ano,2022,2022,JANEIRO,DEZEMBRO,20.689069271087646,20.689069271087646,0.0,53,True,,b3f09d71-0f8f-4be7-8c3d-572ea13dc70b,Thread-268 (_executar_consulta_sequencial),Selenium
 2025-07-09T10:30:47.077282,/consultar,consulta_assincrona_ano,2023,2023,JANEIRO,DEZEMBRO,20.670227766036987,20.670227766036987,0.0,53,True,,b3f09d71-0f8f-4be7-8c3d-572ea13dc70b,Thread-268 (_executar_consulta_sequencial),Selenium
 2025-07-09T10:30:47.081758,/consultar,consulta_assincrona_final,2003,2023,JANEIRO,DEZEMBRO,447.45899987220764,447.33949089050293,0.0,1593,True,,b3f09d71-0f8f-4be7-8c3d-572ea13dc70b,Thread-268 (_executar_consulta_sequencial),Selenium
+2025-07-16T10:43:53.235598,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,26.815707206726074,0.0,0.0,0,False,"500: Message: Service /home/deitos/.cache/selenium/chromedriver/linux64/138.0.7204.157/chromedriver unexpectedly exited. Status code was: 127
+",,MainThread
+2025-07-16T10:47:39.126324,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.9978663921356201,0.0,0.0,0,False,"500: Message: Service /home/deitos/.cache/selenium/chromedriver/linux64/138.0.7204.157/chromedriver unexpectedly exited. Status code was: 127
+",,MainThread
+2025-07-16T10:49:43.394917,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.6749155521392822,0.0,0.0,0,False,500: Google Chrome não está instalado no sistema,,MainThread
+2025-07-16T10:51:53.318873,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.8290219306945801,0.0,0.0,0,False,"500: Message: Service /home/deitos/.cache/selenium/chromedriver/linux64/138.0.7204.157/chromedriver unexpectedly exited. Status code was: 127
+",,MainThread
+2025-07-16T11:01:00.831727,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.053441524505615234,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T11:13:11.015841,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.05565142631530762,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T16:37:03.715804,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.058989524841308594,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T16:43:50.397264,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.0476839542388916,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T16:46:56.595442,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.044243574142456055,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:08:54.435651,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.06729435920715332,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:15:00.352458,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.04615974426269531,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:18:49.948215,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.04525399208068848,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:22:50.477990,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.044853925704956055,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:27:08.650866,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.04584193229675293,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:28:27.161118,/consultar,consulta_assincrona_inicio,2022,2023,JANEIRO,DEZEMBRO,0.002221822738647461,0.0,0.0,0,True,,7e3121dd-5743-4224-928d-5dd8a199e217,MainThread
+2025-07-16T17:28:27.360762,/consultar,consulta_assincrona_ano,2022,2022,JANEIRO,DEZEMBRO,0.0,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,7e3121dd-5743-4224-928d-5dd8a199e217,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:28:27.422159,/consultar,consulta_assincrona_ano,2023,2023,JANEIRO,DEZEMBRO,0.0,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,7e3121dd-5743-4224-928d-5dd8a199e217,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:28:27.439484,/consultar,consulta_assincrona_final,2022,2023,JANEIRO,DEZEMBRO,0.1669149398803711,0.0,0.0,0,True,,7e3121dd-5743-4224-928d-5dd8a199e217,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:36:34.391439,/consultar,consulta_assincrona_inicio,2022,2023,JANEIRO,DEZEMBRO,0.0017774105072021484,0.0,0.0,0,True,,7b6e3285-c615-4f14-a02b-f6ec167c7fd4,MainThread
+2025-07-16T17:36:34.540116,/consultar,consulta_assincrona_ano,2022,2022,JANEIRO,DEZEMBRO,0.0,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,7b6e3285-c615-4f14-a02b-f6ec167c7fd4,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:36:34.584589,/consultar,consulta_assincrona_ano,2023,2023,JANEIRO,DEZEMBRO,0.0,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,7b6e3285-c615-4f14-a02b-f6ec167c7fd4,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:36:34.593321,/consultar,consulta_assincrona_final,2022,2023,JANEIRO,DEZEMBRO,0.1260840892791748,0.0,0.0,0,True,,7b6e3285-c615-4f14-a02b-f6ec167c7fd4,Thread-1 (_executar_consulta_sequencial)
+2025-07-16T17:40:52.685930,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.047272682189941406,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:49:49.966430,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.04611325263977051,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T17:59:16.948318,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.04790472984313965,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-16T18:21:03.037931,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.05070996284484863,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:19:26.463139,/consultar,consulta_sincrona,2023,2023,JANEIRO,DEZEMBRO,0.059386491775512695,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:38:06.336392,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.06035184860229492,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:43:17.309173,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.05830693244934082,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:48:09.004832,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.05699300765991211,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:52:37.936176,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.05540013313293457,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T10:56:58.826971,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.059514760971069336,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T11:02:03.172641,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,0.05484890937805176,0.0,0.0,0,False,500: local variable 'service' referenced before assignment,,MainThread
+2025-07-21T11:12:44.892615,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,22.588037729263306,22.58587336540222,0.0,53,True,,,MainThread
+2025-07-21T13:09:51.359923,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,18.667414903640747,18.665513038635254,0.0,53,True,,,MainThread
+2025-07-21T13:15:15.082933,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,17.8796865940094,17.87764072418213,0.0,53,True,,,MainThread
+2025-07-21T13:24:03.266142,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,19.274670124053955,19.271968126296997,0.0,30,True,,,MainThread
+2025-07-21T14:20:42.262101,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,19.288994550704956,19.286861419677734,0.0,53,True,,,MainThread
+2025-07-21T14:23:47.701874,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,18.1541965007782,18.15237545967102,0.0,53,True,,,MainThread
+2025-07-21T16:26:43.522441,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,21.01735258102417,21.01536726951599,0.0,53,True,,,MainThread
+2025-07-21T16:35:53.556444,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,19.092761754989624,19.090476989746094,0.0,53,True,,,MainThread
+2025-07-21T16:40:34.154932,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,18.71373152732849,18.71180510520935,0.0,53,True,,,MainThread
+2025-07-21T16:47:56.586249,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,19.141063690185547,19.1391282081604,0.0,53,True,,,MainThread
+2025-07-21T16:51:58.344710,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,19.25300145149231,19.251002550125122,0.0,53,True,,,MainThread
+2025-07-21T16:56:07.615648,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,18.62585210800171,18.623870611190796,0.0,53,True,,,MainThread
+2025-07-21T16:58:46.302904,/consultar,consulta_sincrona,2022,2022,JANEIRO,OUTUBRO,18.16611099243164,18.164325952529907,0.0,53,True,,,MainThread
+2025-07-21T17:13:09.247083,/consultar,consulta_sincrona,2023,2023,JANEIRO,MARÇO,19.577147722244263,19.575026988983154,0.0,53,True,,,MainThread
+2025-07-21T17:15:50.118947,/consultar,consulta_sincrona,2022,2022,JANEIRO,JUNHO,19.226205110549927,19.224242448806763,0.0,50,True,,,MainThread
+2025-07-21T17:17:03.913659,/consultar,consulta_sincrona,2021,2021,JANEIRO,DEZEMBRO,18.58284854888916,18.581218481063843,0.0,63,True,,,MainThread
+2025-07-21T17:18:18.320070,/consultar,consulta_sincrona,2020,2020,JULHO,DEZEMBRO,18.539966821670532,18.537832021713257,0.0,57,True,,,MainThread

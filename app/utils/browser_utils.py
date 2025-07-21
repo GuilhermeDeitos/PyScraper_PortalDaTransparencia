@@ -10,6 +10,7 @@ from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from webdriver_manager.chrome import ChromeDriverManager
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -72,8 +73,8 @@ def iniciar_navegador(headless: bool = True, download_dir: Optional[str] = None)
     chrome_options = configurar_chrome_options(headless, download_dir)
     
     try:
-        service = Service(relative_path='../chromedriver.exe')
-        driver = webdriver.Chrome(options=chrome_options, service=service)
+
+        driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
         logger.info("Navegador Chrome iniciado com sucesso")
         return driver
     except Exception as e:

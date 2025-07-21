@@ -24,6 +24,34 @@ dict_mes_numero = {
 # Dicionário inverso para converter de texto para número
 dict_mes_texto_para_numero = {v: k for k, v in dict_mes_numero.items()}
 
+def obter_range_anos(data_inicio: str, data_fim: str) -> Tuple[int, int]:
+    """
+    Obtém o range de anos a partir das datas de início e fim.
+    
+    Args:
+        data_inicio: Data inicial no formato MM/YYYY
+        data_fim: Data final no formato MM/YYYY
+        
+    Returns:
+        Tupla com (ano_inicio, ano_fim)
+    """
+    mes_inicio, ano_inicio = split_data(data_inicio)
+    mes_fim, ano_fim = split_data(data_fim)
+    
+    return ano_inicio, ano_fim
+
+def formatar_mes(mes: str) -> str:
+    """
+    Formata o mês como uma string no formato "MM".
+    
+    Args:
+        mes: Mês como inteiro (1-12)
+        
+    Returns:
+        Mês formatado como string
+    """
+    return f"{int(mes):02d}"
+
 def split_data(data_string: str) -> Tuple[int, int]:
     """
     Separa uma string de data no formato MM/AAAA em mês e ano.

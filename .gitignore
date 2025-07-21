@@ -1,0 +1,10 @@
+venv/
+logs/
+**.log
+*.png
+
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.deb
