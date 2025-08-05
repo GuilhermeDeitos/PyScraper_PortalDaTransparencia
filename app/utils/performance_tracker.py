@@ -136,6 +136,48 @@ class PerformanceTracker:
             thread_id=threading.current_thread().name
         )
 
+    def get_metric_stats(self, operation_type: str) -> Optional[Dict[str, Any]]:
+        """
+        Obtém estatísticas de uma operação específica.
+        
+        Args:
+            operation_type: Tipo de operação para buscar estatísticas
+            
+        Returns:
+            Dicionário com estatísticas ou None se não encontrado
+        """
+        try:
+            import pandas as pd
+            
+            if not os.path.exists(self.csv_path):
+                return None
+                
+            # Lê o CSV
+            df = pd.read_csv(self.csv_path)
+            
+            # Filtra por tipo de operação
+            filtered_df = df[df['operation'] == operation_type]
+            
+            if filtered_df.empty:
+                return None
+            
+            # Calcula estatísticas
+            stats = {
+                "count": len(filtered_df),
+                "avg_tempo_execucao": filtered_df['tempo_total_segundos'].mean(),
+                "min_tempo_execucao": filtered_df['tempo_total_segundos'].min(),
+                "max_tempo_execucao": filtered_df['tempo_total_segundos'].max(),
+                "total_registros": filtered_df['numero_registros'].sum(),
+                "avg_registros": filtered_df['numero_registros'].mean(),
+                "success_rate": (filtered_df['sucesso'] == True).sum() / len(filtered_df) * 100
+            }
+            
+            return stats
+            
+        except Exception as e:
+            logger.error(f"Erro ao calcular estatísticas: {e}")
+            return None
+
 class TimerContext:
     """Context manager para medir tempo de execução"""
     

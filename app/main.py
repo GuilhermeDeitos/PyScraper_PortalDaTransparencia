@@ -1,6 +1,5 @@
 from fastapi import FastAPI
 from app.Routes.routes import router as consulta
-from app.Routes.routes_playwright import router as consulta_playwright
 from app.Core.logging import configure_logging
 
 # Configuração inicial
@@ -15,8 +14,7 @@ app = FastAPI(
 
 # Registro de rotas
 app.include_router(consulta, tags=["Consultas Selenium"])
-app.include_router(consulta_playwright, tags=["Consultas Playwright"])
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000)

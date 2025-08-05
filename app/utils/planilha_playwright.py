@@ -14,7 +14,6 @@ from app.utils.file_utils import (
 )
 
 logger = logging.getLogger(__name__)
-
 async def baixar_e_processar_planilha_playwright(page: Page, download_dir: str) -> Optional[List[Dict[str, Any]]]:
     """
     Baixa e processa a planilha de dados usando Playwright com API nativa de downloads.
@@ -37,7 +36,8 @@ async def baixar_e_processar_planilha_playwright(page: Page, download_dir: str) 
         
         # Aguarda a página carregar completamente
         logger.info("Aguardando página carregar...")
-        await page.wait_for_load_state('networkidle')        
+        await page.wait_for_load_state('networkidle')
+        
         # Aguarda especificamente pelos componentes PrimeFaces carregarem
         try:
             await page.wait_for_function("window.PrimeFaces !== undefined", timeout=10000)
@@ -50,6 +50,16 @@ async def baixar_e_processar_planilha_playwright(page: Page, download_dir: str) 
         await page.wait_for_selector("button[id='formPesquisa:btnVisualizarPlanilha']", 
                                    state='visible', timeout=15000)
         
+        logger.info("Botão encontrado, verificando se está habilitado...")
+        is_enabled = await page.is_enabled("button[id='formPesquisa:btnVisualizarPlanilha']")
+        logger.info(f"Botão habilitado: {is_enabled}")
+        
+        if not is_enabled:
+            logger.error("Botão de download não está habilitado")
+            return None
+
+        logger.info("Iniciando processo de download...")
+        
         async with page.expect_download(timeout=60000) as download_info:
             # Clica no botão para iniciar o download
             await page.click("button[id='formPesquisa:btnVisualizarPlanilha']")
@@ -57,28 +67,49 @@ async def baixar_e_processar_planilha_playwright(page: Page, download_dir: str) 
         
         # Aguarda o download completar
         download = await download_info.value
-        logger.info(f"Download iniciado: {download.suggested_filename}")
+        logger.info(f"Download capturado: {download.suggested_filename}")
         
         # Define o caminho para salvar o arquivo
         arquivo_destino = os.path.join(download_dir, download.suggested_filename)
+        logger.info(f"Salvando arquivo em: {arquivo_destino}")
         
         # Salva o arquivo no diretório especificado
         await download.save_as(arquivo_destino)
-        logger.info(f"Arquivo salvo em: {arquivo_destino}")
+        logger.info(f"Arquivo salvo com sucesso")
         
         # Verifica se o arquivo foi salvo corretamente
-        if not os.path.exists(arquivo_destino) or os.path.getsize(arquivo_destino) == 0:
-            logger.error("Arquivo não foi baixado corretamente")
+        if not os.path.exists(arquivo_destino):
+            logger.error(f"Arquivo não foi encontrado após download: {arquivo_destino}")
             return None
         
-        logger.info(f"Download concluído com sucesso: {os.path.basename(arquivo_destino)}")
+        tamanho_arquivo = os.path.getsize(arquivo_destino)
+        logger.info(f"Arquivo salvo - Tamanho: {tamanho_arquivo} bytes")
+        
+        if tamanho_arquivo == 0:
+            logger.error("Arquivo baixado está vazio")
+            return None
+        
+        logger.info("Download concluído com sucesso, iniciando processamento...")
+        
+        # LOGS DETALHADOS ANTES DO PROCESSAMENTO
+        logger.info("=== INICIANDO PROCESSAMENTO DA PLANILHA ===")
+        logger.info(f"Arquivo a ser processado: {arquivo_destino}")
+        logger.info(f"Arquivo existe: {os.path.exists(arquivo_destino)}")
+        logger.info(f"Tamanho do arquivo: {tamanho_arquivo} bytes")
         
         # Processa a planilha em uma thread separada para não bloquear
+        logger.info("Executando processamento em thread separada...")
         registros = await asyncio.get_event_loop().run_in_executor(
             None, _processar_planilha_sync, arquivo_destino
         )
         
-        logger.info(f"=== FIM DA FUNÇÃO - {len(registros) if registros else 0} registros processados ===")
+        logger.info(f"Processamento concluído - Resultado: {type(registros)}")
+        
+        if registros is None:
+            logger.error("Processamento retornou None")
+            return None
+        
+        logger.info(f"=== FIM DA FUNÇÃO - {len(registros)} registros processados ===")
         return registros
         
     except Exception as e:
@@ -91,53 +122,7 @@ async def baixar_e_processar_planilha_playwright(page: Page, download_dir: str) 
             logger.info(f"Screenshot de erro salvo em: {screenshot_path}")
         except Exception as screenshot_error:
             logger.error(f"Erro ao tirar screenshot: {screenshot_error}")
-            return None
-
         
-        # Se chegou aqui, o botão foi clicado
-        logger.info("=== BOTÃO CLICADO COM SUCESSO ===")
-        logger.info("Aguardando download iniciar...")
-        
-        # Aguarda o download da planilha
-        logger.info("Aguardando conclusão do download...")
-        tempo_inicio = time.time()
-        arquivo_baixado = None
-        max_espera = 60  # segundos
-        # Exibir o diretório de download
-        
-        while time.time() - tempo_inicio < max_espera:
-            # Verifica se há arquivos .xls no diretório
-            logger.debug(f"Verificando arquivos .xls no diretório: {download_dir}")
-            #Obter se tem arquivo .xls no diretório de download
-            arquivos_recentes = obter_arquivos_mais_recentes(download_dir, extensao='.xls')
-            
-            if arquivos_recentes:
-                arquivo_baixado = arquivos_recentes[0]  # O mais recente
-                logger.info(f"Arquivo encontrado: {arquivo_baixado}")
-                
-                # Verifica se o arquivo não está sendo gravado (tamanho estável)
-                tamanho_inicial = os.path.getsize(arquivo_baixado)
-                if os.path.getsize(arquivo_baixado) == tamanho_inicial:
-                    logger.info(f"Download concluído em {time.time() - tempo_inicio:.2f} segundos")
-                    break
-                    
-        if not arquivo_baixado:
-            logger.error("Timeout: Nenhum arquivo Excel foi baixado")
-            return None
-        
-        # Processa a planilha
-        logger.info(f"Processando arquivo: {os.path.basename(arquivo_baixado)}")
-        
-        # Processa a planilha em uma thread separada para não bloquear
-        registros = await asyncio.get_event_loop().run_in_executor(
-            None, _processar_planilha_sync, arquivo_baixado
-        )
-        
-        logger.info(f"=== FIM DA FUNÇÃO - {len(registros) if registros else 0} registros processados ===")
-        return registros
-        
-    except Exception as e:
-        logger.error(f"Erro geral na função: {e}", exc_info=True)
         return None
 
 def _processar_planilha_sync(arquivo_baixado: str) -> Optional[List[Dict[str, Any]]]:
@@ -150,57 +135,109 @@ def _processar_planilha_sync(arquivo_baixado: str) -> Optional[List[Dict[str, An
     Returns:
         Lista de dicionários com os dados processados, ou None em caso de erro
     """
+    logger.info(f"=== INICIO _processar_planilha_sync ===")
+    logger.info(f"Arquivo recebido: {arquivo_baixado}")
+    
     try:
+        # Verificações iniciais
+        if not os.path.exists(arquivo_baixado):
+            logger.error(f"Arquivo não encontrado: {arquivo_baixado}")
+            return None
+        
+        tamanho = os.path.getsize(arquivo_baixado)
+        logger.info(f"Tamanho do arquivo: {tamanho} bytes")
+        
+        if tamanho == 0:
+            logger.error("Arquivo está vazio")
+            return None
+        
         # Leitura do arquivo Excel
+        logger.info("Tentando ler arquivo Excel...")
+        df = None
+        
         try:
             # Tenta ler com xlrd (compatível com formatos .xls antigos)
+            logger.info("Tentando com engine 'xlrd'...")
             df = pd.read_excel(arquivo_baixado, engine='xlrd')
-            logger.debug("Arquivo processado com engine 'xlrd'")
+            logger.info("Arquivo lido com sucesso usando 'xlrd'")
         except Exception as e1:
-            logger.warning(f"Erro ao processar com xlrd: {e1}, tentando openpyxl")
+            logger.warning(f"Erro ao processar com xlrd: {e1}")
             try:
                 # Tenta com openpyxl (para formatos .xlsx mais recentes)
+                logger.info("Tentando com engine 'openpyxl'...")
                 df = pd.read_excel(arquivo_baixado, engine='openpyxl')
-                logger.debug("Arquivo processado com engine 'openpyxl'")
+                logger.info("Arquivo lido com sucesso usando 'openpyxl'")
             except Exception as e2:
                 logger.error(f"Falha ao processar arquivo com openpyxl: {e2}")
                 raise
         
+        if df is None:
+            logger.error("DataFrame não foi criado")
+            return None
+        
+        logger.info(f"DataFrame criado - Shape inicial: {df.shape}")
+        logger.info(f"Colunas iniciais: {list(df.columns)}")
+        
         # Normalização e limpeza dos dados
-        logger.debug("Normalizando e limpando dados...")
+        logger.info("Iniciando normalização e limpeza dos dados...")
         
         # Remove colunas completamente vazias
+        colunas_antes = len(df.columns)
         df = df.dropna(axis=1, how='all')
+        colunas_depois = len(df.columns)
+        logger.info(f"Colunas vazias removidas: {colunas_antes} -> {colunas_depois}")
         
         # Renomeia colunas para formato mais amigável
+        logger.info("Renomeando colunas...")
         df.columns = [
             str(col).strip().lower().replace(' ', '_').replace('/', '_').replace('-', '_')
             for col in df.columns
         ]
+        logger.info(f"Colunas renomeadas: {list(df.columns)}")
         
+        logger.info("Aplicando correção de colunas...")
         df = corrigir_colunas_playwright(df)
-        logger.debug("Colunas normalizadas e corrigidas")
+        logger.info(f"Colunas após correção: {list(df.columns)}")
+        logger.info(f"Shape após correção de colunas: {df.shape}")
         
+        # Remove primeira linha se existir (cabeçalhos duplicados)
         if len(df) > 0:
+            logger.info("Removendo primeira linha (cabeçalho duplicado)")
             df = df.drop(0)
-            
+            logger.info(f"Shape após remover primeira linha: {df.shape}")
+        
         # Substitui valores não compatíveis com JSON
+        logger.info("Substituindo valores incompatíveis...")
         df = df.replace([float('inf'), float('-inf'), pd.NA, pd.NaT], np.nan)
+        
+        # Aplicar filtros específicos
+        registros_antes_filtro = len(df)
+        logger.info(f"Registros antes do filtro: {registros_antes_filtro}")
         
         # Retirar os dados cuja unidade orçamentária é tecpar, gestão e fundo paraná
         if 'UNIDADE_ORÇAMENTÁRIA' in df.columns:
+            logger.info("Aplicando filtro da unidade orçamentária...")
+            filtro_antes = len(df)
             df = df[~df['UNIDADE_ORÇAMENTÁRIA'].str.contains(
                 "45.70 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / INSTITUTO DE TECNOLOGIA DO PARANÁ – TECPAR|"
                 "45.04 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / GESTÃO ADMINISTRATIVA|"
                 "45.60 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / FUNDO PARANÁ", 
                 na=False
             )]
+            filtro_depois = len(df)
+            logger.info(f"Filtro aplicado: {filtro_antes} -> {filtro_depois} registros")
+        else:
+            logger.warning("Coluna 'UNIDADE_ORÇAMENTÁRIA' não encontrada - filtro não aplicado")
+            logger.info(f"Colunas disponíveis: {list(df.columns)}")
         
         # Converte para lista de dicionários
+        logger.info("Convertendo para lista de dicionários...")
         registros = df.to_dict(orient='records')
+        logger.info(f"Conversão concluída: {len(registros)} registros")
         
         # Limpeza final para compatibilidade com JSON
-        for registro in registros:
+        logger.info("Aplicando limpeza final para compatibilidade JSON...")
+        for i, registro in enumerate(registros):
             for chave, valor in list(registro.items()):
                 # Trata valores NaN/None
                 if isinstance(valor, float) and (np.isnan(valor) or np.isinf(valor)):
@@ -208,27 +245,26 @@ def _processar_planilha_sync(arquivo_baixado: str) -> Optional[List[Dict[str, An
                 # Converte valores numpy para tipos Python nativos
                 elif hasattr(valor, 'dtype') and isinstance(valor, np.generic):
                     registro[chave] = valor.item()
+            
+            if i == 0:  # Log do primeiro registro como exemplo
+                logger.info(f"Exemplo do primeiro registro: {dict(list(registro.items())[:3])}")
         
-        logger.info(f"Processamento concluído: {len(registros)} registros obtidos")
-        
-        # Log de amostra dos dados (apenas em modo DEBUG)
-        if logger.isEnabledFor(logging.DEBUG) and registros:
-            primeiras_chaves = list(registros[0].keys())[:5]  # Primeiras 5 chaves
-            amostra = {k: registros[0][k] for k in primeiras_chaves}
-            logger.debug(f"Amostra dos dados: {amostra}")
+        logger.info(f"Processamento concluído com sucesso: {len(registros)} registros finais")
         
         # Tenta excluir o arquivo após processamento
         try:
             os.remove(arquivo_baixado)
-            logger.debug(f"Arquivo temporário excluído: {os.path.basename(arquivo_baixado)}")
+            logger.info(f"Arquivo temporário excluído: {os.path.basename(arquivo_baixado)}")
         except Exception as e:
             logger.warning(f"Não foi possível excluir o arquivo: {e}")
         
+        logger.info(f"=== FIM _processar_planilha_sync - SUCESSO ===")
         return registros
         
     except Exception as e:
-        logger.error(f"Erro ao processar planilha: {e}", exc_info=True)
+        logger.error(f"=== ERRO em _processar_planilha_sync: {e} ===", exc_info=True)
         return None
+
 
 def corrigir_colunas_playwright(df):
     """

@@ -1,3 +1,4 @@
+from http.client import HTTPException
 from fastapi import APIRouter, Response, status, BackgroundTasks
 from app.Models.Schema import ConsultaParams
 from app.Services.consulta_service import ConsultaService
@@ -33,21 +34,25 @@ async def consultar(body: ConsultaParams, response: Response, background_tasks: 
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"error": f"Erro interno: {str(e)}"}
 
-@router.get("/status-consulta/{id_consulta}", 
-           summary="Verifica o status de uma consulta em andamento")
-async def verificar_status_consulta(id_consulta: str, response: Response):
-    resultado = consulta_service.obter_status_consulta(id_consulta)
+@router.get("/status-consulta/{id_consulta}")
+async def obter_status_consulta(id_consulta: str):
+    """Obtém o status de uma consulta em andamento com dados parciais"""
+    consulta = consulta_service.consulta_repo.obter_consulta(id_consulta)
     
-    if "error" in resultado:
-        response.status_code = status.HTTP_404_NOT_FOUND
-    elif resultado.get("status") == "concluido":
-        response.status_code = status.HTTP_200_OK
-    elif resultado.get("status") == "erro":
-        response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
-    else:
-        response.status_code = status.HTTP_202_ACCEPTED
+    if "error" in consulta:
+        raise HTTPException(status_code=404, detail="Consulta não encontrada")
     
-    return resultado
+    # Adicionar links para dados parciais se disponíveis
+    if consulta["status"] == "processando" and consulta.get("dados_parciais"):
+        consulta["endpoints_dados_parciais"] = {
+            "anos_disponiveis": f"/consulta/{id_consulta}/anos-disponiveis",
+            "dados_por_ano": {
+                ano: f"/consulta/{id_consulta}/ano/{ano}" 
+                for ano in consulta.get("anos_concluidos", [])
+            }
+        }
+    
+    return consulta
 
 @router.get("/performance-metrics", 
            summary="Obtém métricas de performance da API")
@@ -204,3 +209,90 @@ async def obter_resumo_performance(response: Response):
         logger.error(f"Erro ao obter resumo de performance: {e}")
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"error": f"Erro ao processar resumo: {str(e)}"}
+
+@router.get("/consulta/{id_consulta}/ano/{ano}")
+async def obter_dados_ano(id_consulta: str, ano: int):
+    """Obtém os dados de um ano específico de uma consulta"""
+    try:
+        consulta_completa = consulta_service.consulta_repo.obter_consulta(id_consulta)
+        
+        if "error" in consulta_completa:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        
+        # Verificar se o ano foi processado
+        dados_por_ano = consulta_completa.get("dados_parciais") or consulta_completa.get("dados_por_ano", {})
+        
+        if ano not in dados_por_ano:
+            if ano in consulta_completa.get("anos_pendentes", []):
+                raise HTTPException(
+                    status_code=202, 
+                    detail=f"Ano {ano} ainda está sendo processado"
+                )
+            else:
+                raise HTTPException(
+                    status_code=404, 
+                    detail=f"Ano {ano} não encontrado na consulta"
+                )
+        
+        dados_ano = dados_por_ano[ano]
+        return {
+            "ano": ano,
+            "dados": dados_ano["dados"],
+            "total_registros": dados_ano["total_registros"],
+            "processado_em": dados_ano.get("processado_em"),
+            "status_consulta": consulta_completa["status"]
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/consulta/{id_consulta}/anos-disponiveis")
+async def obter_anos_disponiveis(id_consulta: str):
+    """Lista os anos disponíveis e seus status em uma consulta"""
+    try:
+        consulta_completa = consulta_service.consulta_repo.obter_consulta(id_consulta)
+        
+        if "error" in consulta_completa:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        
+        anos_concluidos = consulta_completa.get("anos_concluidos", [])
+        anos_pendentes = consulta_completa.get("anos_pendentes", [])
+        resumo_por_ano = consulta_completa.get("resumo_por_ano", {})
+        
+        response = {
+            "id_consulta": id_consulta,
+            "status_geral": consulta_completa["status"],
+            "anos_concluidos": anos_concluidos,
+            "anos_pendentes": anos_pendentes,
+            "total_anos": len(anos_concluidos) + len(anos_pendentes),
+            "detalhes_por_ano": {}
+        }
+        
+        # Adicionar detalhes para anos concluídos
+        for ano in anos_concluidos:
+            ano_int = int(ano)
+            response["detalhes_por_ano"][ano_int] = {
+                "status": "concluido",
+                "total_registros": resumo_por_ano.get(ano_int, {}).get("total_registros", 0),
+                "processado_em": resumo_por_ano.get(ano_int, {}).get("processado_em"),
+                "endpoint_dados": f"/consulta/{id_consulta}/ano/{ano_int}"
+            }
+        
+        # Adicionar detalhes para anos pendentes
+        for ano in anos_pendentes:
+            ano_int = int(ano)
+            response["detalhes_por_ano"][ano_int] = {
+                "status": "pendente",
+                "total_registros": 0,
+                "processado_em": None,
+                "endpoint_dados": None
+            }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
