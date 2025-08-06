@@ -1,7 +1,7 @@
 from http.client import HTTPException
 from fastapi import APIRouter, Response, status, BackgroundTasks
 from app.Models.Schema import ConsultaParams
-from app.Services.consulta_service import ConsultaService
+from app.Services.consulta_service import ConsultaService, get_system_status
 from app.utils.performance_tracker import performance_tracker
 import logging
 import pandas as pd
@@ -296,3 +296,8 @@ async def obter_anos_disponiveis(id_consulta: str):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/system-status")
+async def get_system_status_endpoint():
+    """Obtém status atual do sistema de scrapers"""
+    return get_system_status()
