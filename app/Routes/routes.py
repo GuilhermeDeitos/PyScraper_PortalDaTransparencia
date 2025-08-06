@@ -1,5 +1,4 @@
-from http.client import HTTPException
-from fastapi import APIRouter, Response, status, BackgroundTasks
+from fastapi import APIRouter, Response, status, BackgroundTasks, HTTPException
 from app.Models.Schema import ConsultaParams
 from app.Services.consulta_service import ConsultaService, get_system_status
 from app.utils.performance_tracker import performance_tracker
@@ -54,50 +53,46 @@ async def obter_status_consulta(id_consulta: str):
     
     return consulta
 
+def convert_numpy_types(obj):
+    """Converte tipos numpy para tipos Python nativos"""
+    import numpy as np
+    
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, (np.bool_, bool)):
+        return bool(obj)
+    elif pd.isna(obj):
+        return None
+    else:
+        return obj
+
 @router.get("/performance-metrics", 
            summary="Obtém métricas de performance da API")
 async def obter_metricas_performance(response: Response):
-    """
-    Retorna as métricas de performance salvas no arquivo CSV.
-    Inclui estatísticas resumidas e os dados brutos.
-    """
+    """Obtém as métricas de performance coletadas durante as consultas"""
     try:
-        csv_path = performance_tracker.csv_path
-        
-        if not os.path.exists(csv_path):
-            response.status_code = status.HTTP_404_NOT_FOUND
-            return {"error": "Arquivo de métricas não encontrado"}
+        # Verifica se o arquivo existe
+        metrics_file = "performance_metrics.csv"
+        if not os.path.exists(metrics_file):
+            return {"error": "Nenhuma métrica encontrada"}
         
         # Lê o arquivo CSV
-        df = pd.read_csv(csv_path)
+        df = pd.read_csv(metrics_file)
         
         if df.empty:
-            return {
-                "estatisticas": {"total_consultas": 0},
-                "metricas": []
-            }
+            return {"error": "Nenhuma métrica encontrada"}
         
-        def convert_numpy_types(obj):
-            """Converte tipos numpy/pandas para tipos Python nativos"""
-            if obj is None or pd.isna(obj):
-                return None
-            elif hasattr(obj, 'item'):  # Tipos numpy
-                return obj.item()
-            elif isinstance(obj, (pd.Timestamp, pd.DatetimeIndex)):
-                return str(obj)
-            elif isinstance(obj, bool):
-                return bool(obj)
-            elif isinstance(obj, (int, float)):
-                return int(obj) if isinstance(obj, int) else float(obj)
-            elif hasattr(obj, 'dtype'):  # Outros tipos pandas/numpy
-                try:
-                    return obj.item()
-                except (ValueError, AttributeError):
-                    return str(obj)
-            else:
-                return obj
+        # Converte colunas de tempo para numérico se necessário
+        if 'tempo_total_segundos' not in df.columns and 'tempo_total' in df.columns:
+            df['tempo_total_segundos'] = pd.to_numeric(df['tempo_total'], errors='coerce')
+        elif 'tempo_total_segundos' in df.columns:
+            df['tempo_total_segundos'] = pd.to_numeric(df['tempo_total_segundos'], errors='coerce')
         
-        # Calcula estatísticas resumidas
+        # Estatísticas básicas
         estatisticas = {
             "total_consultas": convert_numpy_types(len(df)),
             "consultas_bem_sucedidas": convert_numpy_types(len(df[df['sucesso'] == True])),
@@ -138,43 +133,28 @@ async def obter_metricas_performance(response: Response):
 @router.get("/performance-summary", 
            summary="Obtém resumo estatístico das métricas de performance")
 async def obter_resumo_performance(response: Response):
-    """
-    Retorna apenas um resumo estatístico das métricas, sem os dados brutos.
-    Útil para dashboards e monitoramento.
-    """
+    """Obtém um resumo estatístico das métricas de performance"""
     try:
-        csv_path = performance_tracker.csv_path
+        # Verifica se o arquivo existe
+        metrics_file = "performance_metrics.csv"
+        if not os.path.exists(metrics_file):
+            return {"error": "Nenhuma métrica encontrada"}
         
-        if not os.path.exists(csv_path):
-            response.status_code = status.HTTP_404_NOT_FOUND
-            return {"error": "Arquivo de métricas não encontrado"}
-        
-        df = pd.read_csv(csv_path)
+        # Lê o arquivo CSV
+        df = pd.read_csv(metrics_file)
         
         if df.empty:
-            return {"total_consultas": 0}
+            return {"error": "Nenhuma métrica encontrada"}
         
-        def convert_numpy_types(obj):
-            """Converte tipos numpy/pandas para tipos Python nativos"""
-            if obj is None or pd.isna(obj):
-                return None
-            elif hasattr(obj, 'item'):  # Tipos numpy
-                return obj.item()
-            elif isinstance(obj, (pd.Timestamp, pd.DatetimeIndex)):
-                return str(obj)
-            elif isinstance(obj, bool):
-                return bool(obj)
-            elif isinstance(obj, (int, float)):
-                return int(obj) if isinstance(obj, int) else float(obj)
-            elif hasattr(obj, 'dtype'):  # Outros tipos pandas/numpy
-                try:
-                    return obj.item()
-                except (ValueError, AttributeError):
-                    return str(obj)
-            else:
-                return obj
+        # Converte timestamp para datetime se não estiver
+        if 'timestamp' in df.columns:
+            df['timestamp'] = pd.to_datetime(df['timestamp'])
         
-        # Filtra apenas consultas concluídas (não as de início de processo assíncrono)
+        # Converte tempo total para segundos se necessário
+        if 'tempo_total_segundos' not in df.columns and 'tempo_total' in df.columns:
+            df['tempo_total_segundos'] = pd.to_numeric(df['tempo_total'], errors='coerce')
+        
+        # Filtra apenas consultas concluídas (síncronas e assíncronas finais)
         df_concluidas = df[df['operation'].isin(['consulta_sincrona', 'consulta_assincrona_final'])]
         
         resumo = {
@@ -219,33 +199,161 @@ async def obter_dados_ano(id_consulta: str, ano: int):
         if "error" in consulta_completa:
             raise HTTPException(status_code=404, detail="Consulta não encontrada")
         
-        # Verificar se o ano foi processado
-        dados_por_ano = consulta_completa.get("dados_parciais") or consulta_completa.get("dados_por_ano", {})
+        # Verifica se o ano está na lista de anos processados
+        anos_concluidos = consulta_completa.get("anos_concluidos", [])
+        anos_pendentes = consulta_completa.get("anos_pendentes", [])
         
-        if ano not in dados_por_ano:
-            if ano in consulta_completa.get("anos_pendentes", []):
-                raise HTTPException(
-                    status_code=202, 
-                    detail=f"Ano {ano} ainda está sendo processado"
-                )
-            else:
-                raise HTTPException(
-                    status_code=404, 
-                    detail=f"Ano {ano} não encontrado na consulta"
-                )
+        # Converte ano para string para comparação
+        ano_str = str(ano)
         
-        dados_ano = dados_por_ano[ano]
-        return {
-            "ano": ano,
-            "dados": dados_ano["dados"],
-            "total_registros": dados_ano["total_registros"],
-            "processado_em": dados_ano.get("processado_em"),
-            "status_consulta": consulta_completa["status"]
-        }
+        # Verifica se o ano ainda está pendente
+        if ano in anos_pendentes and ano not in anos_concluidos:
+            raise HTTPException(
+                status_code=202, 
+                detail=f"Ano {ano} ainda está sendo processado"
+            )
+        
+        # Verifica se o ano foi processado
+        if ano not in anos_concluidos:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Ano {ano} não foi encontrado ou não está no escopo da consulta"
+            )
+        
+        # Busca dados do ano específico
+        dados_parciais_por_ano = consulta_completa.get("dados_parciais_por_ano", {})
+        resumo_por_ano = consulta_completa.get("resumo_por_ano", {})
+        
+        # Verifica se temos dados para o ano (pode estar como string ou int)
+        dados_ano = None
+        resumo_ano = None
+        
+        # Tenta buscar como string primeiro
+        if ano_str in dados_parciais_por_ano:
+            dados_ano = dados_parciais_por_ano[ano_str]
+        elif str(ano) in resumo_por_ano:
+            # Se não tem dados parciais, mas tem resumo, busca pelos períodos
+            resumo_ano = resumo_por_ano[str(ano)]
+        
+        # Tenta buscar como int se não encontrou como string
+        if not dados_ano and ano in dados_parciais_por_ano:
+            dados_ano = dados_parciais_por_ano[ano]
+        elif not resumo_ano and ano in resumo_por_ano:
+            resumo_ano = resumo_por_ano[ano]
+        
+        # Se encontrou dados diretos do ano
+        if dados_ano:
+            return {
+                "ano": ano,
+                "dados": dados_ano.get("dados", []),
+                "total_registros": dados_ano.get("total_registros", 0),
+                "periodos_processados": dados_ano.get("periodos", []),
+                "processado_em": dados_ano.get("processado_em"),
+                "status_consulta": consulta_completa["status"],
+                "fonte_dados": "dados_parciais_por_ano"
+            }
+        
+        # Se não tem dados diretos, reconstrói pelos períodos
+        elif resumo_ano:
+            # Busca dados pelos períodos individuais
+            dados_por_periodo = consulta_completa.get("dados_parciais_por_periodo", {})
+            periodos_processados = resumo_ano.get("periodos_processados", [])
+            
+            dados_consolidados = []
+            for periodo in periodos_processados:
+                if periodo in dados_por_periodo:
+                    dados_periodo = dados_por_periodo[periodo].get("dados", [])
+                    dados_consolidados.extend(dados_periodo)
+            
+            return {
+                "ano": ano,
+                "dados": dados_consolidados,
+                "total_registros": len(dados_consolidados),
+                "periodos_processados": periodos_processados,
+                "processado_em": resumo_ano.get("processado_em"),
+                "status_consulta": consulta_completa["status"],
+                "fonte_dados": "reconstruido_por_periodos"
+            }
+        
+        # Se chegou até aqui, não encontrou dados
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Dados do ano {ano} não encontrados, mesmo estando marcado como processado"
+        )
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Erro ao obter dados do ano {ano} para consulta {id_consulta}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/consulta/{id_consulta}/periodo/{ano}/{mes}")
+async def obter_dados_periodo(id_consulta: str, ano: int, mes: int):
+    """Obtém os dados de um período específico (ano/mês) de uma consulta"""
+    try:
+        consulta_completa = consulta_service.consulta_repo.obter_consulta(id_consulta)
+        
+        if "error" in consulta_completa:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        
+        # Formata o período
+        periodo = f"{ano}-{mes:02d}"
+        
+        # Verifica se o período está concluído
+        periodos_concluidos = consulta_completa.get("periodos_concluidos", [])
+        periodos_pendentes = consulta_completa.get("periodos_pendentes", [])
+        
+        if periodo in periodos_pendentes and periodo not in periodos_concluidos:
+            raise HTTPException(
+                status_code=202, 
+                detail=f"Período {periodo} ainda está sendo processado"
+            )
+        
+        if periodo not in periodos_concluidos:
+            raise HTTPException(
+                status_code=404, 
+                detail=f"Período {periodo} não foi encontrado ou não está no escopo da consulta"
+            )
+        
+        # Busca dados do período específico
+        dados_por_periodo = consulta_completa.get("dados_parciais_por_periodo", {})
+        resumo_por_periodo = consulta_completa.get("resumo_por_periodo", {})
+        
+        if periodo in dados_por_periodo:
+            dados_periodo = dados_por_periodo[periodo]
+            return {
+                "periodo": periodo,
+                "ano": ano,
+                "mes": mes,
+                "dados": dados_periodo.get("dados", []),
+                "total_registros": dados_periodo.get("total_registros", 0),
+                "processado_em": dados_periodo.get("processado_em"),
+                "status_consulta": consulta_completa["status"]
+            }
+        
+        # Se não encontrou dados, mas tem resumo
+        elif periodo in resumo_por_periodo:
+            resumo = resumo_por_periodo[periodo]
+            return {
+                "periodo": periodo,
+                "ano": ano,
+                "mes": mes,
+                "dados": [],  # Dados não disponíveis no resumo
+                "total_registros": resumo.get("total_registros", 0),
+                "processado_em": resumo.get("processado_em"),
+                "status_consulta": consulta_completa["status"],
+                "observacao": "Apenas resumo disponível, dados detalhados não encontrados"
+            }
+        
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Dados do período {periodo} não encontrados"
+        )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter dados do período {ano}-{mes:02d} para consulta {id_consulta}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/consulta/{id_consulta}/anos-disponiveis")
@@ -266,35 +374,108 @@ async def obter_anos_disponiveis(id_consulta: str):
             "status_geral": consulta_completa["status"],
             "anos_concluidos": anos_concluidos,
             "anos_pendentes": anos_pendentes,
-            "total_anos": len(anos_concluidos) + len(anos_pendentes),
+            "total_anos": len(set(anos_concluidos + anos_pendentes)),
             "detalhes_por_ano": {}
         }
         
         # Adicionar detalhes para anos concluídos
         for ano in anos_concluidos:
-            ano_int = int(ano)
-            response["detalhes_por_ano"][ano_int] = {
+            ano_key = str(ano)
+            resumo_ano = resumo_por_ano.get(ano_key, resumo_por_ano.get(ano, {}))
+            
+            response["detalhes_por_ano"][ano] = {
                 "status": "concluido",
-                "total_registros": resumo_por_ano.get(ano_int, {}).get("total_registros", 0),
-                "processado_em": resumo_por_ano.get(ano_int, {}).get("processado_em"),
-                "endpoint_dados": f"/consulta/{id_consulta}/ano/{ano_int}"
+                "total_registros": resumo_ano.get("total_registros", 0),
+                "processado_em": resumo_ano.get("processado_em"),
+                "periodos_processados": resumo_ano.get("periodos_processados", []),
+                "tem_dados": resumo_ano.get("tem_dados", False),
+                "endpoint_dados": f"/consulta/{id_consulta}/ano/{ano}"
             }
         
         # Adicionar detalhes para anos pendentes
         for ano in anos_pendentes:
-            ano_int = int(ano)
-            response["detalhes_por_ano"][ano_int] = {
-                "status": "pendente",
-                "total_registros": 0,
-                "processado_em": None,
-                "endpoint_dados": None
-            }
+            if ano not in anos_concluidos:  # Evita duplicação
+                response["detalhes_por_ano"][ano] = {
+                    "status": "pendente",
+                    "total_registros": 0,
+                    "processado_em": None,
+                    "periodos_processados": [],
+                    "tem_dados": False,
+                    "endpoint_dados": None
+                }
         
         return response
         
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"Erro ao obter anos disponíveis para consulta {id_consulta}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.get("/consulta/{id_consulta}/periodos-disponiveis")
+async def obter_periodos_disponiveis(id_consulta: str):
+    """Lista os períodos disponíveis e seus status em uma consulta"""
+    try:
+        consulta_completa = consulta_service.consulta_repo.obter_consulta(id_consulta)
+        
+        if "error" in consulta_completa:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        
+        periodos_concluidos = consulta_completa.get("periodos_concluidos", [])
+        periodos_pendentes = consulta_completa.get("periodos_pendentes", [])
+        resumo_por_periodo = consulta_completa.get("resumo_por_periodo", {})
+        
+        response = {
+            "id_consulta": id_consulta,
+            "status_geral": consulta_completa["status"],
+            "periodos_concluidos": periodos_concluidos,
+            "periodos_pendentes": periodos_pendentes,
+            "total_periodos": len(set(periodos_concluidos + periodos_pendentes)),
+            "detalhes_por_periodo": {}
+        }
+        
+        # Adicionar detalhes para períodos concluídos
+        for periodo in periodos_concluidos:
+            resumo_periodo = resumo_por_periodo.get(periodo, {})
+            ano = resumo_periodo.get("ano")
+            mes = resumo_periodo.get("mes")
+            
+            response["detalhes_por_periodo"][periodo] = {
+                "status": "concluido",
+                "ano": ano,
+                "mes": mes,
+                "total_registros": resumo_periodo.get("total_registros", 0),
+                "processado_em": resumo_periodo.get("processado_em"),
+                "tem_dados": resumo_periodo.get("tem_dados", False),
+                "endpoint_dados": f"/consulta/{id_consulta}/periodo/{ano}/{mes}" if ano and mes else None
+            }
+        
+        # Adicionar detalhes para períodos pendentes
+        for periodo in periodos_pendentes:
+            if periodo not in periodos_concluidos:  # Evita duplicação
+                # Extrai ano e mês do formato YYYY-MM
+                try:
+                    ano, mes = periodo.split('-')
+                    ano, mes = int(ano), int(mes)
+                except:
+                    ano, mes = None, None
+                
+                response["detalhes_por_periodo"][periodo] = {
+                    "status": "pendente",
+                    "ano": ano,
+                    "mes": mes,
+                    "total_registros": 0,
+                    "processado_em": None,
+                    "tem_dados": False,
+                    "endpoint_dados": None
+                }
+        
+        return response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter períodos disponíveis para consulta {id_consulta}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/system-status")
