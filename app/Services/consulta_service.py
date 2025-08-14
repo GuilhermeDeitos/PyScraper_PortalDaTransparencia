@@ -26,10 +26,9 @@ SCRAPER_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SCRAPERS, threa
 class ConsultaService:
     def __init__(self):
         self.consulta_repo = ConsultaRepository()
-        # Cada consulta não mantém mais uma instância de scraper
         
     async def processar_consulta(self, params: ConsultaParams, background_tasks: BackgroundTasks):
-        """Processa uma consulta de dados do Portal da Transparência"""
+        """Processa uma consulta de dados do Portal da Transparência organizando por ano"""
         inicio_total = time.time()
         
         mes_inicio, ano_inicio, mes_fim, ano_fim = validar_parametros(
@@ -38,13 +37,13 @@ class ConsultaService:
         
         # Verifica se há slots disponíveis para processamento
         slots_disponiveis = SCRAPER_SEMAPHORE._value
-        total_periodos = self._calcular_total_periodos(ano_inicio, mes_inicio, ano_fim, mes_fim)
+        total_anos = ano_fim - ano_inicio + 1
                 
         if ano_inicio != ano_fim:
             # Processamento assíncrono para múltiplos anos
             id_consulta = str(uuid.uuid4())
             
-            # Inicializa o registro da consulta com parâmetros mensais
+            # Inicializa o registro da consulta organizando por anos
             self.consulta_repo.iniciar_consulta(
                 id_consulta, 
                 anos_range=(ano_inicio, ano_fim),
@@ -80,20 +79,20 @@ class ConsultaService:
             performance_tracker.salvar_metrica(metrica)
             
             # Mensagem informativa sobre recursos
-            mensagem_recursos = self._gerar_mensagem_recursos(slots_disponiveis, total_periodos)
+            mensagem_recursos = self._gerar_mensagem_recursos(slots_disponiveis, total_anos)
             
             return {
                 "status": "processando",
                 "mensagem": f"Consulta para o período {mes_inicio:02d}/{ano_inicio} a {mes_fim:02d}/{ano_fim} iniciada em background",
                 "id_consulta": id_consulta,
                 "consultar_status": f"/status-consulta/{id_consulta}",
-                "total_periodos": total_periodos,
+                "total_anos": total_anos,
                 "slots_disponiveis": slots_disponiveis,
                 "max_concurrent_scrapers": MAX_CONCURRENT_SCRAPERS,
                 "info_recursos": mensagem_recursos
             }
         else:
-            # Processamento síncrono para um único ano (com controle de concorrência)
+            # Processamento síncrono para um único ano
             try:
                 inicio_scraper = time.time()
                 
@@ -123,34 +122,21 @@ class ConsultaService:
                         "mensagem": f"Todos os slots estão ocupados. Consulta movida para processamento assíncrono",
                         "id_consulta": id_consulta,
                         "consultar_status": f"/status-consulta/{id_consulta}",
-                        "total_periodos": total_periodos,
+                        "total_anos": total_anos,
                         "slots_disponiveis": 0,
                         "max_concurrent_scrapers": MAX_CONCURRENT_SCRAPERS,
                         "motivo_assincrono": "recursos_esgotados"
                     }
                 
-                # Para um único ano, processa por períodos mensais
-                dados_por_periodo = {}
-                total_registros = 0
-                
-                for mes in range(mes_inicio, mes_fim + 1):
-                    # Usa o semáforo para controlar concorrência
-                    with SCRAPER_SEMAPHORE:
-                        resultado_mes = self._executar_scraper_com_retry(ano_inicio, mes, mes)
-                    
-                    periodo = f"{ano_inicio}-{mes:02d}"
-                    dados_por_periodo[periodo] = {
-                        "dados": resultado_mes,
-                        "total_registros": len(resultado_mes) if resultado_mes else 0,
-                        "ano": ano_inicio,
-                        "mes": mes
-                    }
-                    total_registros += len(resultado_mes) if resultado_mes else 0
+                # Para um único ano, processa o ano completo
+                with SCRAPER_SEMAPHORE:
+                    resultado_ano = self._executar_scraper_com_retry(ano_inicio, mes_inicio, mes_fim)
                 
                 fim_scraper = time.time()
                 
                 tempo_total = time.time() - inicio_total
                 tempo_scraping = fim_scraper - inicio_scraper
+                total_registros = len(resultado_ano) if resultado_ano else 0
                 
                 # Registra métrica para consulta síncrona
                 metrica = performance_tracker.criar_metrica(
@@ -167,17 +153,24 @@ class ConsultaService:
                 )
                 performance_tracker.salvar_metrica(metrica)
                 
-                # Consolida dados para compatibilidade
-                dados_consolidados = []
-                for periodo_dados in dados_por_periodo.values():
-                    dados_consolidados.extend(periodo_dados["dados"])
+                # Organiza dados por ano (mesmo sendo um único ano)
+                dados_por_ano = {
+                    str(ano_inicio): {
+                        "dados": resultado_ano,
+                        "total_registros": total_registros,
+                        "mes_inicio": mes_inicio,
+                        "mes_fim": mes_fim,
+                        "processado_em": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                }
                 
                 return {
-                    "dados": dados_consolidados,
+                    "dados": resultado_ano,  # Mantém compatibilidade
+                    "dados_por_ano": dados_por_ano,  # Nova estrutura por ano
                     "total_registros": total_registros,
-                    "dados_por_periodo": dados_por_periodo,
+                    "anos_processados": [ano_inicio],
                     "processamento": "sincrono",
-                    "slots_utilizados": min(total_periodos, MAX_CONCURRENT_SCRAPERS)
+                    "slots_utilizados": 1
                 }
                 
             except Exception as e:
@@ -202,7 +195,7 @@ class ConsultaService:
         """Inicia processamento em background usando o pool de threads"""
         # Submete a tarefa ao pool de threads global
         future = SCRAPER_EXECUTOR.submit(
-            self._executar_consulta_por_periodos,
+            self._executar_consulta_por_anos,
             id_consulta, ano_inicio, mes_inicio, ano_fim, mes_fim
         )
         
@@ -220,8 +213,8 @@ class ConsultaService:
         
         future.add_done_callback(log_completion)
     
-    def _executar_consulta_por_periodos(self, id_consulta, ano_inicio, mes_inicio, ano_fim, mes_fim):
-        """Executa consulta processando período por período (mês/ano)"""
+    def _executar_consulta_por_anos(self, id_consulta, ano_inicio, mes_inicio, ano_fim, mes_fim):
+        """Executa consulta processando ano por ano"""
         inicio_total = time.time()
         thread_name = threading.current_thread().name
         
@@ -229,84 +222,100 @@ class ConsultaService:
             total_registros = 0
             tempo_scraping_total = 0.0
             
-            # Gera todos os períodos que devem ser processados
-            periodos_para_processar = self._gerar_lista_periodos(ano_inicio, mes_inicio, ano_fim, mes_fim)
+            # Gera todos os anos que devem ser processados
+            anos_para_processar = list(range(ano_inicio, ano_fim + 1))
             
-            logger.info(f"[{thread_name}] Iniciando processamento de {len(periodos_para_processar)} períodos para consulta {id_consulta}")
+            logger.info(f"[{thread_name}] Iniciando processamento de {len(anos_para_processar)} anos para consulta {id_consulta}")
             
-            for idx, (ano, mes) in enumerate(periodos_para_processar, 1):
-                periodo = f"{ano}-{mes:02d}"
+            for idx, ano in enumerate(anos_para_processar, 1):
+                # Determina o período para o ano atual
+                if ano == ano_inicio and ano == ano_fim:
+                    # Mesmo ano: usar mês específico de início e fim
+                    mes_inicial_ano = mes_inicio
+                    mes_final_ano = mes_fim
+                elif ano == ano_inicio:
+                    # Primeiro ano: do mês específico até dezembro
+                    mes_inicial_ano = mes_inicio
+                    mes_final_ano = 12
+                elif ano == ano_fim:
+                    # Último ano: de janeiro até mês específico
+                    mes_inicial_ano = 1
+                    mes_final_ano = mes_fim
+                else:
+                    # Anos intermediários: ano completo
+                    mes_inicial_ano = 1
+                    mes_final_ano = 12
                 
                 # Atualiza status com informação de progresso e thread
-                progresso = f"{idx}/{len(periodos_para_processar)}"
+                progresso = f"{idx}/{len(anos_para_processar)}"
                 slots_disponiveis = SCRAPER_SEMAPHORE._value
                 
                 self.consulta_repo.atualizar_status_processando(
                     id_consulta, 
-                    f"[{thread_name}] Aguardando slot para período {periodo} ({progresso}) - Slots disponíveis: {slots_disponiveis}"
+                    f"[{thread_name}] Aguardando slot para ano {ano} ({progresso}) - Slots disponíveis: {slots_disponiveis}"
                 )
                 
                 # Controla concorrência com semáforo
                 with SCRAPER_SEMAPHORE:
                     self.consulta_repo.atualizar_status_processando(
                         id_consulta, 
-                        f"[{thread_name}] Processando período {periodo} ({progresso})"
+                        f"[{thread_name}] Processando ano {ano} (meses {mes_inicial_ano:02d}-{mes_final_ano:02d}) ({progresso})"
                     )
                     
                     try:
-                        # Executa o scraper para o período específico com medição de tempo
-                        inicio_scraper_periodo = time.time()
-                        resultado_periodo = self._executar_scraper_com_retry(ano, mes, mes)
-                        fim_scraper_periodo = time.time()
+                        # Executa o scraper para o ano específico com medição de tempo
+                        inicio_scraper_ano = time.time()
+                        resultado_ano = self._executar_scraper_com_retry(ano, mes_inicial_ano, mes_final_ano)
+                        fim_scraper_ano = time.time()
                         
-                        tempo_scraper_periodo = fim_scraper_periodo - inicio_scraper_periodo
-                        registros_periodo = len(resultado_periodo) if resultado_periodo else 0
-                        total_registros += registros_periodo
-                        tempo_scraping_total += tempo_scraper_periodo
+                        tempo_scraper_ano = fim_scraper_ano - inicio_scraper_ano
+                        registros_ano = len(resultado_ano) if resultado_ano else 0
+                        total_registros += registros_ano
+                        tempo_scraping_total += tempo_scraper_ano
                         
-                        # Registra métrica para cada período processado
-                        metrica_periodo = performance_tracker.criar_metrica(
+                        # Registra métrica para cada ano processado
+                        metrica_ano = performance_tracker.criar_metrica(
                             endpoint="/consultar",
-                            operation="consulta_assincrona_periodo",
+                            operation="consulta_assincrona_ano",
                             ano_inicio=ano,
                             ano_fim=ano,
-                            mes_inicio=mes,
-                            mes_fim=mes,
-                            tempo_total=tempo_scraper_periodo,
-                            tempo_scraping=tempo_scraper_periodo,
-                            numero_registros=registros_periodo,
+                            mes_inicio=mes_inicial_ano,
+                            mes_fim=mes_final_ano,
+                            tempo_total=tempo_scraper_ano,
+                            tempo_scraping=tempo_scraper_ano,
+                            numero_registros=registros_ano,
                             sucesso=True,
                             id_consulta=id_consulta
                         )
-                        performance_tracker.salvar_metrica(metrica_periodo)
+                        performance_tracker.salvar_metrica(metrica_ano)
                         
-                        # Registra resultados por período
-                        self.consulta_repo.adicionar_resultados_periodo(
-                            id_consulta, ano, mes, resultado_periodo
+                        # Registra resultados por ano
+                        self.consulta_repo.adicionar_resultados_ano(
+                            id_consulta, ano, resultado_ano, mes_inicial_ano, mes_final_ano
                         )
                         
-                        logger.info(f"[{thread_name}] Período {periodo} processado: {registros_periodo} registros em {tempo_scraper_periodo:.2f}s ({progresso})")
+                        logger.info(f"[{thread_name}] Ano {ano} processado: {registros_ano} registros em {tempo_scraper_ano:.2f}s ({progresso})")
                         
                     except Exception as e:
-                        logger.error(f"[{thread_name}] Erro ao processar período {periodo}: {e}")
+                        logger.error(f"[{thread_name}] Erro ao processar ano {ano}: {e}")
                         
-                        # Registra métrica para erro do período
-                        metrica_erro_periodo = performance_tracker.criar_metrica(
+                        # Registra métrica para erro do ano
+                        metrica_erro_ano = performance_tracker.criar_metrica(
                             endpoint="/consultar",
-                            operation="consulta_assincrona_periodo",
+                            operation="consulta_assincrona_ano",
                             ano_inicio=ano,
                             ano_fim=ano,
-                            mes_inicio=mes,
-                            mes_fim=mes,
+                            mes_inicio=mes_inicial_ano,
+                            mes_fim=mes_final_ano,
                             tempo_total=0.0,
                             numero_registros=0,
                             sucesso=False,
                             erro_descricao=str(e),
                             id_consulta=id_consulta
                         )
-                        performance_tracker.salvar_metrica(metrica_erro_periodo)
+                        performance_tracker.salvar_metrica(metrica_erro_ano)
                         
-                        self.consulta_repo.registrar_erro_periodo(id_consulta, ano, mes, str(e))
+                        self.consulta_repo.registrar_erro_ano(id_consulta, ano, str(e))
             
             tempo_total_final = time.time() - inicio_total
             
@@ -353,7 +362,7 @@ class ConsultaService:
             
             self.consulta_repo.registrar_erro_consulta(id_consulta, str(e))
     
-    def _executar_scraper_com_retry(self, ano, mes, mes_fim, max_retries=2):
+    def _executar_scraper_com_retry(self, ano, mes_inicio, mes_fim, max_retries=2):
         """Executa scraper com retry em caso de erro - cada chamada cria sua própria instância"""
         last_exception = None
         thread_name = threading.current_thread().name
@@ -362,15 +371,15 @@ class ConsultaService:
             scraper_service = None
             try:
                 # Cria uma nova instância do scraper para cada tentativa
-                logger.debug(f"[{thread_name}] Criando scraper para período {ano}-{mes:02d} (tentativa {tentativa + 1})")
+                logger.debug(f"[{thread_name}] Criando scraper para ano {ano} (meses {mes_inicio:02d}-{mes_fim:02d}) (tentativa {tentativa + 1})")
                 scraper_service = TransparenciaScraper(headless=True)
-                resultado = scraper_service.executar_scraper(ano, mes, mes_fim)
-                logger.debug(f"[{thread_name}] Scraper concluído para período {ano}-{mes:02d}")
+                resultado = scraper_service.executar_scraper(ano, mes_inicio, mes_fim)
+                logger.debug(f"[{thread_name}] Scraper concluído para ano {ano}")
                 return resultado
                 
             except Exception as e:
                 last_exception = e
-                logger.warning(f"[{thread_name}] Tentativa {tentativa + 1}/{max_retries + 1} falhou para período {ano}-{mes:02d}: {e}")
+                logger.warning(f"[{thread_name}] Tentativa {tentativa + 1}/{max_retries + 1} falhou para ano {ano}: {e}")
                 
                 # Garante que o scraper seja limpo em caso de erro
                 if scraper_service:
@@ -385,62 +394,23 @@ class ConsultaService:
                     logger.info(f"[{thread_name}] Aguardando {wait_time}s antes da próxima tentativa...")
                     time.sleep(wait_time)
                 else:
-                    logger.error(f"[{thread_name}] Todas as tentativas falharam para período {ano}-{mes:02d}")
+                    logger.error(f"[{thread_name}] Todas as tentativas falharam para ano {ano}")
         
         # Se chegou aqui, todas as tentativas falharam
         if last_exception:
             raise last_exception
         else:
-            raise Exception(f"Falha ao processar período {ano}-{mes:02d} após {max_retries + 1} tentativas")
+            raise Exception(f"Falha ao processar ano {ano} após {max_retries + 1} tentativas")
     
-    def _calcular_total_periodos(self, ano_inicio, mes_inicio, ano_fim, mes_fim):
-        """Calcula o total de períodos que serão processados"""
-        if ano_inicio == ano_fim:
-            return mes_fim - mes_inicio + 1
-        else:
-            total = 0
-            # Primeiro ano
-            total += 13 - mes_inicio
-            # Anos intermediários
-            total += (ano_fim - ano_inicio - 1) * 12
-            # Último ano
-            total += mes_fim
-            return total
-    
-    def _gerar_mensagem_recursos(self, slots_disponiveis, total_periodos):
+    def _gerar_mensagem_recursos(self, slots_disponiveis, total_anos):
         """Gera mensagem informativa sobre recursos disponíveis"""
         if slots_disponiveis == 0:
             return "Todos os slots de processamento estão ocupados. Sua consulta será enfileirada."
-        elif slots_disponiveis < total_periodos:
-            tempo_estimado = (total_periodos / MAX_CONCURRENT_SCRAPERS) * 30  # Estimativa de 30s por período
+        elif slots_disponiveis < total_anos:
+            tempo_estimado = (total_anos / MAX_CONCURRENT_SCRAPERS) * 60  # Estimativa de 60s por ano
             return f"Processamento paralelo com {slots_disponiveis} slots. Tempo estimado: {tempo_estimado:.0f}s"
         else:
-            return f"Recursos suficientes disponíveis. Processamento otimizado com até {min(slots_disponiveis, total_periodos)} slots."
-    
-    def _gerar_lista_periodos(self, ano_inicio, mes_inicio, ano_fim, mes_fim):
-        """Gera lista de períodos (ano, mês) para processar"""
-        periodos = []
-        
-        if ano_inicio == ano_fim:
-            # Mesmo ano: apenas os meses especificados
-            for mes in range(mes_inicio, mes_fim + 1):
-                periodos.append((ano_inicio, mes))
-        else:
-            # Múltiplos anos
-            # Primeiro ano: do mês inicial até dezembro
-            for mes in range(mes_inicio, 13):
-                periodos.append((ano_inicio, mes))
-            
-            # Anos intermediários: todos os meses
-            for ano in range(ano_inicio + 1, ano_fim):
-                for mes in range(1, 13):
-                    periodos.append((ano, mes))
-            
-            # Último ano: de janeiro até o mês final
-            for mes in range(1, mes_fim + 1):
-                periodos.append((ano_fim, mes))
-        
-        return periodos
+            return f"Recursos suficientes disponíveis. Processamento otimizado com até {min(slots_disponiveis, total_anos)} slots."
     
     def obter_status_consulta(self, id_consulta):
         """Obtém o status atual de uma consulta"""
@@ -460,32 +430,12 @@ class ConsultaService:
                 "ano": ano,
                 "dados": dados_por_ano[str(ano)]["dados"],
                 "total_registros": dados_por_ano[str(ano)]["total_registros"],
-                "periodos": dados_por_ano[str(ano)].get("periodos", [])
+                "mes_inicio": dados_por_ano[str(ano)].get("mes_inicio"),
+                "mes_fim": dados_por_ano[str(ano)].get("mes_fim"),
+                "processado_em": dados_por_ano[str(ano)].get("processado_em")
             }
         
         return {"error": f"Dados do ano {ano} não encontrados ou ainda não processados"}
-    
-    def obter_dados_periodo_especifico(self, id_consulta, ano, mes):
-        """Obtém dados de um período específico de uma consulta"""
-        consulta = self.consulta_repo.obter_consulta(id_consulta)
-        
-        if "error" in consulta:
-            return consulta
-        
-        # Busca dados do período específico
-        periodo = f"{ano}-{mes:02d}"
-        dados_por_periodo = consulta.get("dados_por_periodo", {})
-        
-        if periodo in dados_por_periodo:
-            return {
-                "periodo": periodo,
-                "ano": ano,
-                "mes": mes,
-                "dados": dados_por_periodo[periodo]["dados"],
-                "total_registros": dados_por_periodo[periodo]["total_registros"]
-            }
-        
-        return {"error": f"Dados do período {periodo} não encontrados ou ainda não processados"}
 
 def get_system_status():
     """Função utilitária para obter status do sistema"""

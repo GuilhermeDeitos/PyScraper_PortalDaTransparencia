@@ -105,7 +105,7 @@ class TransparenciaScraper:
         # ----- CAMPO ÓRGÃO -----
         logger.info("Configurando campo de órgão...")
         orgao_desejado = "45 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO"
-        orgao_value = "UniqueKey[codigo=45, exercicio=2023]"
+        orgao_value = "UniqueKey[codigo=45]"
         executar_javascript_seguro(self.driver,
             f"var select = document.getElementById('formPesquisaDespesa:filtroOrgao_input'); "
             f"select.value = '{orgao_value}'; "

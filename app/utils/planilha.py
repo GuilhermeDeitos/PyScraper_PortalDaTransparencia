@@ -129,7 +129,7 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
         df = df.replace([float('inf'), float('-inf'), pd.NA, pd.NaT], np.nan)
         
         # Retirar os dados cuja unidade orcamentaria é tecpar, gestão e fundo paraná
-        df = df[~df['UNIDADE_ORÇAMENTÁRIA'].str.contains("45.70 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / INSTITUTO DE TECNOLOGIA DO PARANÁ – TECPAR|45.04 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / GESTÃO ADMINISTRATIVA|45.60 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / FUNDO PARANÁ", na=False)]
+        df = df[~df['UNIDADE_ORÇAMENTÁRIA'].str.contains("45.70 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / INSTITUTO DE TECNOLOGIA DO PARANÁ – TECPAR|45.04 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / GESTÃO ADMINISTRATIVA|45.60 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / FUNDO PARANÁ|45.01 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / GABINETE DO SECRETARIO|45.02 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / DIRETORIA GERAL|45.60 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / FUNDO PARANA|45.04 - SUPERINTENDECIA CIENCIA, TEC E EN SUPERI / SUPERINTENDENCIA DE CIENCIA, TECNOLOGIA E ENSINO SUPERIOR", na=False)]
 
         # Converte para lista de dicionários
         registros = df.to_dict(orient='records')
