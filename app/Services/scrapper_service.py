@@ -104,8 +104,8 @@ class TransparenciaScraper:
         
         # ----- CAMPO ÓRGÃO -----
         logger.info("Configurando campo de órgão...")
-        orgao_desejado = "45 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO"
-        orgao_value = "UniqueKey[codigo=45]"
+        orgao_desejado = "45" 
+        orgao_value = "UniqueKey[codigo=45, exercicio=2023]"
         executar_javascript_seguro(self.driver,
             f"var select = document.getElementById('formPesquisaDespesa:filtroOrgao_input'); "
             f"select.value = '{orgao_value}'; "
@@ -118,7 +118,17 @@ class TransparenciaScraper:
         self._marcar_checkbox('formPesquisaDespesa:detalheFiltroFuncao', "funções")
         self._marcar_checkbox('formPesquisaDespesa:detalheFiltroOrigemRecursos', "origens de recursos")
         self._marcar_checkbox('formPesquisaDespesa:detalhFiltroGrupoDespesaNatureza', "grupos de natureza de despesa")
-    
+
+    def _tirar_screenshot(self, nome_arquivo: str) -> None:
+        """
+        Tira uma screenshot da página atual.
+        
+        Args:
+            nome_arquivo: Nome do arquivo onde a screenshot será salva.
+        """
+        logger.info(f"Tirando screenshot: {nome_arquivo}")
+        self.driver.save_screenshot(nome_arquivo)
+
     def _marcar_checkbox(self, id_base: str, descricao: str) -> None:
         """
         Marca um checkbox PrimeFaces usando JavaScript.
@@ -290,6 +300,7 @@ class TransparenciaScraper:
             with TimerContext("baixar_processar_planilha") as timer_planilha:
                 # Baixa e processa a planilha
                 logger.info("Iniciando download e processamento da planilha...")
+
                 dados = baixar_e_processar_planilha(self.driver, self.download_dir)
                 logger.info(f"Processamento concluído, {len(dados) if dados else 0} registros obtidos")
             

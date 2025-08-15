@@ -373,7 +373,7 @@ class ConsultaService:
                 # Cria uma nova instância do scraper para cada tentativa
                 logger.debug(f"[{thread_name}] Criando scraper para ano {ano} (meses {mes_inicio:02d}-{mes_fim:02d}) (tentativa {tentativa + 1})")
                 scraper_service = TransparenciaScraper(headless=True)
-                resultado = scraper_service.executar_scraper(ano, mes_inicio, mes_fim)
+                resultado = scraper_service.executar_scraper(ano, dict_mes_numero[mes_inicio], dict_mes_numero[mes_fim])
                 logger.debug(f"[{thread_name}] Scraper concluído para ano {ano}")
                 return resultado
                 

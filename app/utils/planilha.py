@@ -12,7 +12,6 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.by import By
 from selenium.common.exceptions import TimeoutException
-
 from app.utils.file_utils import (
     obter_arquivos_mais_recentes, 
     limpar_diretorio
@@ -90,24 +89,15 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
         if not arquivo_baixado:
             logger.error("Timeout: Nenhum arquivo Excel foi baixado")
             return None
-        
+
         # Processa a planilha
         logger.info(f"Processando arquivo: {os.path.basename(arquivo_baixado)}")
         
-        try:
-            # Tenta ler com xlrd (compatível com formatos .xls antigos)
-            df = pd.read_excel(arquivo_baixado, engine='xlrd')
-            logger.debug("Arquivo processado com engine 'xlrd'")
-        except Exception as e1:
-            logger.warning(f"Erro ao processar com xlrd: {e1}, tentando openpyxl")
-            try:
-                # Tenta com openpyxl (para formatos .xlsx mais recentes)
-                df = pd.read_excel(arquivo_baixado, engine='openpyxl')
-                logger.debug("Arquivo processado com engine 'openpyxl'")
-            except Exception as e2:
-                logger.error(f"Falha ao processar arquivo com openpyxl: {e2}")
-                raise
+        # Converte o arquivo para csv
         
+
+        df = pd.read_excel(arquivo_baixado)
+
         # Normalização e limpeza dos dados
         logger.debug("Normalizando e limpando dados...")
         
@@ -120,17 +110,25 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
             for col in df.columns
         ]
         
+
         df = corrigir_colunas(df)
-        logger.debug("Colunas normalizadas e corrigidas")
+        logger.debug("Colunas normalizadas e corrigidas")    
+        # Substitui valores não compatíveis com JSON de forma mais robusta
+        # Tratamento específico para cada tipo de valor problemático
+        for col in df.select_dtypes(include=[np.number]).columns:
+            # Para valores infinitos
+            df.loc[df[col] == float('inf'), col] = np.nan
+            df.loc[df[col] == float('-inf'), col] = np.nan
         
-        if len(df) > 0:
-            df = df.drop(0)       
-        # Substitui valores não compatíveis com JSON
-        df = df.replace([float('inf'), float('-inf'), pd.NA, pd.NaT], np.nan)
+        # Para valores pd.NA e pd.NaT em todas as colunas
+        df = df.fillna(np.nan)        
         
         # Retirar os dados cuja unidade orcamentaria é tecpar, gestão e fundo paraná
-        df = df[~df['UNIDADE_ORÇAMENTÁRIA'].str.contains("45.70 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / INSTITUTO DE TECNOLOGIA DO PARANÁ – TECPAR|45.04 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / GESTÃO ADMINISTRATIVA|45.60 - SECRETARIA DE ESTADO DA CIÊNCIA, TECNOLO / FUNDO PARANÁ|45.01 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / GABINETE DO SECRETARIO|45.02 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / DIRETORIA GERAL|45.60 - SEC. ESTADO DA CIENCIA, TEC E E.SUPERIO / FUNDO PARANA|45.04 - SUPERINTENDECIA CIENCIA, TEC E EN SUPERI / SUPERINTENDENCIA DE CIENCIA, TECNOLOGIA E ENSINO SUPERIOR", na=False)]
-
+        # CORREÇÃO: usar o nome correto da coluna após corrigir_colunas
+        if 'UNIDADE_ORCAMENTARIA' in df.columns:
+            df = df[~df['UNIDADE_ORCAMENTARIA'].str.contains("GABINETE DO SECRETÁRIO|SUPERINTENDENCIA DE CIENCIA, TECNOLOGIA E ENSINO SUPERIOR|TECPAR|GESTÃO ADMINISTRATIVA|FUNDO PARANÁ|GABINETE DO SECRETARIO|DIRETORIA GERAL|FUNDO PARANA", na=False)]
+        else:
+            logger.warning("Coluna 'UNIDADE_ORCAMENTARIA' não encontrada, pulando filtro")
         # Converte para lista de dicionários
         registros = df.to_dict(orient='records')
         
@@ -167,43 +165,80 @@ def baixar_e_processar_planilha(driver: webdriver.Chrome, diretorio_download: st
 
 def corrigir_colunas(df):
     """
-    Corrige nomes de colunas tratando subheaders:
-    - Substitui colunas "unnamed" com subheader "NO MÊS" pelo nome da coluna anterior + "_no_mes"
-    - Adiciona "_ate_mes" nas colunas com subheader "ATÉ MÊS"
-    - Converte todos os nomes para maiúsculas
+    Corrige a estrutura das colunas do CSV do Portal da Transparência.
+    O CSV tem uma estrutura específica com subheaders nas primeiras linhas.
     """
-    nova_estrutura = {}
-    coluna_anterior = None
+    logger.debug(f"DataFrame original - shape: {df.shape}")
+    logger.debug(f"Primeiras 5 linhas:\n{df.head()}")
     
-    # Primeiro, extrair os nomes das colunas e seus valores de subheader
-    colunas = df.columns.tolist()
-    subheaders = df.iloc[0].tolist() if len(df) > 0 else [None] * len(colunas)
+    if len(df) < 2:
+        logger.warning("DataFrame tem menos de 2 linhas, retornando sem alterações")
+        return df
     
-    # Mapear para o novo formato
-    for i, (coluna, subheader) in enumerate(zip(colunas, subheaders)):
-        # Verificar se é uma coluna unnamed
-        if 'unnamed' in str(coluna).lower():
-            novo_nome = f"{coluna_anterior}_no_mes"
-            nova_estrutura[coluna] = novo_nome
-        else:
-            # Tratamento especial para a coluna "pago_(r$)"
-            if "pago_(r$)" in str(coluna).lower() and "no_mes" not in str(coluna).lower():
-                novo_nome = f"{coluna}_ate_mes"
-                nova_estrutura[coluna] = novo_nome
-            # Para colunas nomeadas com "ATÉ MÊS", adicionar sufixo
-            elif isinstance(subheader, str) and subheader == 'ATÉ MÊS':
-                novo_nome = f"{coluna}_ate_mes"
-                nova_estrutura[coluna] = novo_nome
-            else:
-                nova_estrutura[coluna] = coluna
-            
-            # Armazenar nome da coluna para uso com unnamed seguintes
-            coluna_anterior = coluna
+    # Mapear as colunas corretas baseado na estrutura do CSV
+    novos_nomes = [
+        "UNIDADE_ORCAMENTARIA",
+        "FUNCAO", 
+        "GRUPO_NATUREZA_DESPESA",
+        "ORIGEM_RECURSOS",
+        "ORCAMENTO_INICIAL_LOA",
+        "TOTAL_ORCAMENTARIO_ATE_MES",
+        "TOTAL_ORCAMENTARIO_NO_MES", 
+        "DISPONIBILIDADE_ORCAMENTARIA_ATE_MES",
+        "DISPONIBILIDADE_ORCAMENTARIA_NO_MES",
+        "EMPENHADO_ATE_MES",
+        "EMPENHADO_NO_MES",
+        "LIQUIDADO_ATE_MES",
+        "LIQUIDADO_NO_MES",
+        "PAGO_ATE_MES",
+        "PAGO_NO_MES"
+    ]
     
-    # Renomear colunas no DataFrame
-    df = df.rename(columns=nova_estrutura)
+    # Ajustar para o número real de colunas
+    num_colunas = len(df.columns)
+    while len(novos_nomes) < num_colunas:
+        novos_nomes.append(f"COLUNA_{len(novos_nomes)}")
     
-    # Converter todos os nomes para maiúsculas
-    df.columns = [str(col).upper() for col in df.columns]
+    # Renomear as colunas
+    df.columns = novos_nomes[:num_colunas]
+    logger.debug(f"Colunas renomeadas para: {df.columns.tolist()}")
+    
+    # Identificar e remover linhas de cabeçalho/subheader
+    # Procurar pela linha que contém "ATÉ MÊS" ou similar
+    linhas_para_remover = []
+    
+    for idx in range(min(5, len(df))):  # Verificar apenas as primeiras 5 linhas
+        linha = df.iloc[idx]
+        # Verificar se a linha contém indicadores de cabeçalho
+        linha_str = ' '.join([str(val) for val in linha.values if pd.notna(val)])
+        
+        if any(indicador in linha_str.upper() for indicador in [
+            'ATÉ MÊS', 'NO MÊS', 'UNIDADE ORÇAMENTÁRIA', 'FUNÇÃO', 
+            'GRUPO DE NATUREZA', 'ORIGEM DOS RECURSOS'
+        ]):
+            linhas_para_remover.append(idx)
+            logger.debug(f"Linha {idx} marcada para remoção (cabeçalho): {linha_str[:100]}")
+    
+    # Remover linhas de cabeçalho identificadas
+    if linhas_para_remover:
+        df = df.drop(linhas_para_remover).reset_index(drop=True)
+        logger.debug(f"Removidas {len(linhas_para_remover)} linhas de cabeçalho")
+    
+    # Remover linhas completamente vazias ou que são resumos/totais
+    df_original_len = len(df)
+    
+    # Filtrar linhas vazias
+    df = df.dropna(how='all')    
+    
+    linhas_removidas = df_original_len - len(df)
+    if linhas_removidas > 0:
+        logger.debug(f"Removidas {linhas_removidas} linhas vazias/totais")
+    
+    # Limpar e converter valores monetários
+    colunas_monetarias = [col for col in df.columns if any(palavra in col for palavra in [
+        'ORCAMENTO', 'DISPONIBILIDADE', 'EMPENHADO', 'LIQUIDADO', 'PAGO'
+    ])]
+    
+    logger.debug(f"Colunas monetárias identificadas: {colunas_monetarias}")
     
     return df
