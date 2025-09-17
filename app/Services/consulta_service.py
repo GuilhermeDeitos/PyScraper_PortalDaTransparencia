@@ -1,4 +1,5 @@
 import os
+from typing import Any, Dict, List
 from fastapi import BackgroundTasks
 import threading
 import uuid
@@ -13,19 +14,80 @@ from app.Services.scrapper_service import TransparenciaScraper
 from app.utils.validators import validar_parametros
 from app.utils.date_utils import dict_mes_numero
 from app.utils.performance_tracker import performance_tracker, TimerContext
+from threading import Lock
+import weakref
 
 logger = logging.getLogger(__name__)
 
 # Configuração para controle de concorrência
 MAX_CONCURRENT_SCRAPERS = 3  # Máximo de scrapers simultâneos
 SCRAPER_SEMAPHORE = Semaphore(MAX_CONCURRENT_SCRAPERS)
+ano_locks = weakref.WeakValueDictionary()
+ano_locks_creation_lock = Lock()
 
 # Pool global de threads para scrapers
 SCRAPER_EXECUTOR = ThreadPoolExecutor(max_workers=MAX_CONCURRENT_SCRAPERS, thread_name_prefix="ScraperThread")
 
+def get_lock_for_ano(ano: int) -> Lock:
+    """Obtém ou cria um lock para um ano específico"""
+    with ano_locks_creation_lock:
+        # Tenta obter o lock existente
+        lock = ano_locks.get(ano)
+        if lock is None:
+            # Se não existe, cria um novo
+            lock = Lock()
+            ano_locks[ano] = lock
+        return lock
+    
 class ConsultaService:
     def __init__(self):
         self.consulta_repo = ConsultaRepository()
+        
+    def _validar_dados_ano(self, dados: List[Dict[str, Any]], ano: int) -> List[Dict[str, Any]]:
+        """
+        Valida e corrige dados de um ano específico.
+        
+        Args:
+            dados: Lista de dados a validar
+            ano: Ano esperado dos dados
+            
+        Returns:
+            Lista de dados validados
+        """
+        dados_validos = []
+        registros_invalidos = 0
+        
+        for registro in dados:
+            # Verificar se os campos críticos estão corretos
+            valido = True
+            
+            # Verificar campo GRUPO_NATUREZA_DESPESA
+            if "GRUPO_NATUREZA_DESPESA" in registro:
+                valor = registro["GRUPO_NATUREZA_DESPESA"]
+                # Se contém texto de origem, está invertido
+                if isinstance(valor, str) and (valor.startswith("O -") or valor.startswith("T -")):
+                    logger.warning(f"Registro com campos invertidos detectado para ano {ano}")
+                    valido = False
+                    registros_invalidos += 1
+            
+            # Verificar se ORIGEM_RECURSOS contém valores numéricos quando não deveria
+            if "ORIGEM_RECURSOS" in registro:
+                valor = str(registro["ORIGEM_RECURSOS"])
+                # Se é puramente numérico e grande, provavelmente é um valor monetário
+                if valor.replace(".", "").replace(",", "").isdigit() and len(valor) > 4:
+                    logger.warning(f"ORIGEM_RECURSOS com valor numérico suspeito: {valor}")
+                    valido = False
+                    registros_invalidos += 1
+            
+            if valido:
+                # Adicionar ano ao registro para rastreamento
+                registro['_ano_validado'] = ano
+                dados_validos.append(registro)
+        
+        if registros_invalidos > 0:
+            logger.warning(f"Detectados {registros_invalidos} registros inválidos de {len(dados)} para ano {ano}")
+        
+        return dados_validos
         
     async def processar_consulta(self, params: ConsultaParams, background_tasks: BackgroundTasks):
         """Processa uma consulta de dados do Portal da Transparência organizando por ano"""
@@ -229,6 +291,16 @@ class ConsultaService:
             
             for idx, ano in enumerate(anos_para_processar, 1):
                 # Determina o período para o ano atual
+                ano_lock = get_lock_for_ano(ano)
+                
+                if not ano_lock.acquire(blocking=False):
+                    logger.warning(f"[{thread_name}] Ano {ano} já está sendo processado por outra thread, pulando...")
+                    self.consulta_repo.registrar_erro_ano(
+                        id_consulta, ano, 
+                        "Ano já está sendo processado por outra consulta"
+                    )
+                    continue
+
                 if ano == ano_inicio and ano == ano_fim:
                     # Mesmo ano: usar mês específico de início e fim
                     mes_inicial_ano = mes_inicio
@@ -316,6 +388,9 @@ class ConsultaService:
                         performance_tracker.salvar_metrica(metrica_erro_ano)
                         
                         self.consulta_repo.registrar_erro_ano(id_consulta, ano, str(e))
+                    finally:
+                        # Sempre liberar o lock do ano
+                        ano_lock.release()
             
             tempo_total_final = time.time() - inicio_total
             
@@ -363,40 +438,52 @@ class ConsultaService:
             self.consulta_repo.registrar_erro_consulta(id_consulta, str(e))
     
     def _executar_scraper_com_retry(self, ano, mes_inicio, mes_fim, max_retries=2):
-        """Executa scraper com retry em caso de erro - cada chamada cria sua própria instância"""
+        """Executa scraper com retry e validação dos dados"""
         last_exception = None
         thread_name = threading.current_thread().name
         
         for tentativa in range(max_retries + 1):
             scraper_service = None
             try:
-                # Cria uma nova instância do scraper para cada tentativa
-                logger.debug(f"[{thread_name}] Criando scraper para ano {ano} (meses {mes_inicio:02d}-{mes_fim:02d}) (tentativa {tentativa + 1})")
+                logger.debug(f"[{thread_name}] Criando scraper para ano {ano} (tentativa {tentativa + 1})")
                 scraper_service = TransparenciaScraper(headless=True)
-                resultado = scraper_service.executar_scraper(ano, dict_mes_numero[mes_inicio], dict_mes_numero[mes_fim])
-                logger.debug(f"[{thread_name}] Scraper concluído para ano {ano}")
-                return resultado
                 
+                # Executar scraper
+                resultado = scraper_service.executar_scraper(ano, dict_mes_numero[mes_inicio], dict_mes_numero[mes_fim])
+                
+                # Validar dados retornados
+                if resultado:
+                    resultado_validado = self._validar_dados_ano(resultado, ano)
+                    
+                    # Se muitos dados foram invalidados, tentar novamente
+                    taxa_validade = len(resultado_validado) / len(resultado) if resultado else 0
+                    if taxa_validade < 0.8:  # Menos de 80% válido
+                        logger.warning(f"[{thread_name}] Taxa de validade baixa ({taxa_validade:.2%}) para ano {ano}")
+                        if tentativa < max_retries:
+                            raise Exception(f"Taxa de validade muito baixa: {taxa_validade:.2%}")
+                    
+                    logger.debug(f"[{thread_name}] Scraper concluído para ano {ano} - {len(resultado_validado)} registros válidos")
+                    return resultado_validado
+                else:
+                    return []
+                    
             except Exception as e:
                 last_exception = e
                 logger.warning(f"[{thread_name}] Tentativa {tentativa + 1}/{max_retries + 1} falhou para ano {ano}: {e}")
                 
-                # Garante que o scraper seja limpo em caso de erro
                 if scraper_service:
                     try:
-                        scraper_service.__del__()
+                        scraper_service.cleanup()
                     except:
                         pass
                 
                 if tentativa < max_retries:
-                    # Aguarda antes da próxima tentativa com backoff exponencial
-                    wait_time = (tentativa + 1) * 2
-                    logger.info(f"[{thread_name}] Aguardando {wait_time}s antes da próxima tentativa...")
+                    wait_time = (tentativa + 1) * 3 + random.uniform(0, 2)
+                    logger.info(f"[{thread_name}] Aguardando {wait_time:.1f}s antes da próxima tentativa...")
                     time.sleep(wait_time)
                 else:
                     logger.error(f"[{thread_name}] Todas as tentativas falharam para ano {ano}")
         
-        # Se chegou aqui, todas as tentativas falharam
         if last_exception:
             raise last_exception
         else:

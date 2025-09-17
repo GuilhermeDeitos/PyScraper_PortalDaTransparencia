@@ -8,20 +8,36 @@ import tempfile
 import logging
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+import uuid
 
 logger = logging.getLogger(__name__)
 
-def criar_diretorio_temporario() -> str:
+def criar_diretorio_temporario(subdir: str = None) -> str:
     """
-    Cria um diretório temporário para download de arquivos.
+    Cria um diretório temporário único para downloads.
     
+    Args:
+        subdir: Nome do subdiretório específico (opcional)
+        
     Returns:
-        Caminho do diretório temporário criado
+        Caminho completo do diretório criado
     """
-    temp_dir = os.path.join(tempfile.gettempdir(), f"api_scraper_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
-    os.makedirs(temp_dir, exist_ok=True)
-    logger.debug(f"Diretório temporário criado: {temp_dir}")
-    return temp_dir
+    if subdir:
+        # Usar o subdir fornecido dentro do temp
+        temp_base = tempfile.gettempdir()
+        download_dir = os.path.join(temp_base, "scraper_downloads", subdir)
+    else:
+        # Gerar nome único baseado em timestamp e UUID
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        dir_name = f"scraper_{timestamp}_{unique_id}"
+        temp_base = tempfile.gettempdir()
+        download_dir = os.path.join(temp_base, "scraper_downloads", dir_name)
+    
+    # Criar o diretório se não existir
+    os.makedirs(download_dir, exist_ok=True)
+    
+    return download_dir
 
 def obter_arquivos_diretorio(diretorio: str, padrao: str = "*") -> List[str]:
     """
@@ -80,15 +96,10 @@ def limpar_diretorio(diretorio: str) -> None:
         logger.error(f"Erro ao limpar diretório {diretorio}: {e}")
 
 def remover_diretorio(diretorio: str) -> None:
-    """
-    Remove um diretório e todo seu conteúdo.
-    
-    Args:
-        diretorio: Caminho do diretório a ser removido
-    """
+    """Remove um diretório e todo seu conteúdo"""
     try:
         if os.path.exists(diretorio):
             shutil.rmtree(diretorio)
-            logger.debug(f"Diretório removido: {diretorio}")
     except Exception as e:
-        logger.error(f"Erro ao remover diretório {diretorio}: {e}")
+        # Log erro mas não falha - diretório pode estar em uso
+        print(f"Aviso: Não foi possível remover {diretorio}: {e}")

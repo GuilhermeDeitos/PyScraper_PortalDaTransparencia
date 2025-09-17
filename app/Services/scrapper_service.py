@@ -1,3 +1,4 @@
+import threading
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
@@ -14,10 +15,17 @@ from app.utils.performance_tracker import TimerContext
 import logging
 import time
 from typing import List, Dict, Any, Tuple, Callable, Optional
+import os
+import uuid
+from datetime import datetime
+import random
+import tempfile
 
 # Configuração de logging
 logger = logging.getLogger(__name__)
 
+# Lock global para garantir criação segura de diretórios
+DIRECTORY_CREATION_LOCK = threading.Lock()
 
 class TransparenciaScraper:
     """Classe para extrair dados do Portal da Transparência do Paraná."""
@@ -32,15 +40,92 @@ class TransparenciaScraper:
         self.headless = headless
         self.driver = None
         self.download_dir = None
+        # ID único para esta instância do scraper
+        self.scraper_id = str(uuid.uuid4())[:8]
+        self.thread_id = threading.get_ident()
+        logger.info(f"Criando scraper {self.scraper_id} na thread {self.thread_id}")
     
     def _iniciar_navegador(self) -> None:
         """Inicia o navegador Chrome com as opções configuradas."""
-        logger.info("Criando diretório temporário para downloads...")
-        self.download_dir = criar_diretorio_temporario()
+        with DIRECTORY_CREATION_LOCK:
+            # Criar diretório único para cada thread/scraper
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+            dir_name = f"downloads_{self.scraper_id}_{timestamp}_{self.thread_id}"
+            
+            logger.info(f"[Scraper {self.scraper_id}] Criando diretório temporário isolado: {dir_name}")
+            self.download_dir = criar_diretorio_temporario(subdir=dir_name)
         
-        logger.info("Iniciando o navegador Chrome...")
-        self.driver = iniciar_navegador(headless=self.headless, download_dir=self.download_dir)
-        logger.info("Navegador iniciado com sucesso")
+        logger.info(f"[Scraper {self.scraper_id}] Iniciando navegador Chrome isolado...")
+        
+        # Adicionar mais isolamento nas opções do Chrome
+        chrome_options = Options()
+        if self.headless:
+            chrome_options.add_argument("--headless=new")  # Novo modo headless
+        
+        # Opções para melhor isolamento entre instâncias
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-extensions")
+        chrome_options.add_argument("--disable-plugins")
+        chrome_options.add_argument("--disable-images")
+        chrome_options.add_argument("--disable-javascript-harmony-shipping")
+        
+        # Criar diretório de perfil único para cada instância
+        profile_dir = os.path.join(tempfile.gettempdir(), f"chrome_profile_{self.scraper_id}")
+        chrome_options.add_argument(f"--user-data-dir={profile_dir}")
+        
+        # Adicionar um port único para cada instância
+        port = 9222 + random.randint(0, 1000)
+        chrome_options.add_argument(f"--remote-debugging-port={port}")
+        
+        # Configurações de download específicas
+        prefs = {
+            "download.default_directory": self.download_dir,
+            "download.prompt_for_download": False,
+            "download.directory_upgrade": True,
+            "safebrowsing.enabled": False,
+            "profile.default_content_setting_values.automatic_downloads": 1,
+            "profile.default_content_settings.popups": 0,
+            "profile.managed_user_id": self.scraper_id,
+            "profile.content_settings.exceptions.automatic_downloads.*.setting": 1
+        }
+        chrome_options.add_experimental_option("prefs", prefs)
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option("useAutomationExtension", False)
+        
+        # Configurar capacidades desejadas
+        chrome_options.set_capability("acceptInsecureCerts", True)
+        chrome_options.set_capability("pageLoadStrategy", "normal")
+        
+        try:
+            self.driver = webdriver.Chrome(options=chrome_options)
+            
+            # Configurar timeouts
+            self.driver.implicitly_wait(10)
+            self.driver.set_page_load_timeout(60)
+            self.driver.set_script_timeout(30)
+            
+            # Verificar e configurar o diretório de download após inicialização
+            self.driver.execute_script(f"""
+                if (window.chrome && window.chrome.downloads) {{
+                    chrome.downloads.setShelfEnabled(false);
+                }}
+            """)
+            
+            logger.info(f"[Scraper {self.scraper_id}] Navegador iniciado com sucesso (porta: {port})")
+            
+        except Exception as e:
+            logger.error(f"[Scraper {self.scraper_id}] Erro ao iniciar navegador: {e}")
+            # Limpar diretório de perfil em caso de erro
+            if os.path.exists(profile_dir):
+                try:
+                    remover_diretorio(profile_dir)
+                except:
+                    pass
+            raise
     
     def _interagir_com_elemento(self, estrategias: List[Tuple[str, Callable]], mensagem_erro: str = "Erro ao interagir com elemento") -> Any:
         """
@@ -260,6 +345,44 @@ class TransparenciaScraper:
                 logger.warning("Nenhum resultado visível após a pesquisa")
         except Exception as e:
             logger.warning(f"Não foi possível verificar os resultados: {e}")
+            
+            
+    def __del__(self):
+        """Destrutor para garantir limpeza de recursos"""
+        self.cleanup()
+    
+    def cleanup(self):
+        """Limpa recursos do scraper"""
+        try:
+            if self.driver:
+                logger.info(f"[Scraper {self.scraper_id}] Fechando navegador...")
+                try:
+                    # Limpar cookies e storage antes de fechar
+                    self.driver.execute_script("window.localStorage.clear();")
+                    self.driver.execute_script("window.sessionStorage.clear();")
+                    self.driver.delete_all_cookies()
+                except:
+                    pass
+                    
+                self.driver.quit()
+                self.driver = None
+                
+            if self.download_dir and os.path.exists(self.download_dir):
+                logger.info(f"[Scraper {self.scraper_id}] Limpando diretório: {self.download_dir}")
+                remover_diretorio(self.download_dir)
+                self.download_dir = None
+                
+            # Limpar diretório de perfil do Chrome
+            profile_dir = os.path.join(tempfile.gettempdir(), f"chrome_profile_{self.scraper_id}")
+            if os.path.exists(profile_dir):
+                try:
+                    remover_diretorio(profile_dir)
+                except:
+                    pass
+                    
+        except Exception as e:
+            logger.error(f"[Scraper {self.scraper_id}] Erro na limpeza: {e}")
+    
     
     def executar_scraper(self, ano: int, mes_inicio: str, mes_fim: str) -> List[Dict[str, Any]]:
         """
@@ -276,7 +399,12 @@ class TransparenciaScraper:
         Raises:
             HTTPException: Em caso de erro durante a execução.
         """
-        logger.info(f"Iniciando scraper para ano={ano}, mes_inicio={mes_inicio}, mes_fim={mes_fim}")
+        logger.info(f"[Scraper {self.scraper_id}] Iniciando para ano={ano}, mes_inicio={mes_inicio}, mes_fim={mes_fim}, thread={self.thread_id}")
+        
+        # Adicionar delay aleatório para evitar condições de corrida
+        delay = random.uniform(0.5, 2.0)
+        logger.debug(f"[Scraper {self.scraper_id}] Aguardando {delay:.2f}s antes de iniciar...")
+        time.sleep(delay)
         
         try:
             with TimerContext("iniciar_navegador") as timer_navegador:
@@ -285,27 +413,38 @@ class TransparenciaScraper:
             with TimerContext("acessar_url") as timer_url:
                 # Acessa a URL de consulta
                 url = "https://www.transparencia.pr.gov.br/pte/assunto/4/22?origem=3"
-                logger.info(f"Acessando URL: {url}")
+                logger.info(f"[Scraper {self.scraper_id}] Acessando URL: {url}")
                 self.driver.get(url)
-                time.sleep(5)  # Aguarda carregar
+                
+                # Aguardar página carregar completamente
+                WebDriverWait(self.driver, 20).until(
+                    lambda driver: driver.execute_script("return document.readyState") == "complete"
+                )
+                time.sleep(3)  # Aguarda adicional para garantir
             
             with TimerContext("preencher_formulario") as timer_formulario:
                 # Preenche o formulário com os parâmetros
                 self._preencher_formulario(ano, mes_inicio, mes_fim)
+                # Aguarda processamento do formulário
+                time.sleep(2)
             
             with TimerContext("clicar_botao_pesquisa") as timer_pesquisa:
                 # Clica no botão de pesquisa
                 self._clicar_botao_pesquisa()
+                # Aguarda resultados carregarem
+                time.sleep(3)
             
             with TimerContext("baixar_processar_planilha") as timer_planilha:
                 # Baixa e processa a planilha
-                logger.info("Iniciando download e processamento da planilha...")
-
-                dados = baixar_e_processar_planilha(self.driver, self.download_dir)
-                logger.info(f"Processamento concluído, {len(dados) if dados else 0} registros obtidos")
+                logger.info(f"[Scraper {self.scraper_id}] Iniciando download e processamento da planilha...")
+                
+                # Passar o scraper_id para o processamento da planilha
+                dados = baixar_e_processar_planilha(self.driver, self.download_dir, scraper_id=self.scraper_id)
+                
+                logger.info(f"[Scraper {self.scraper_id}] Processamento concluído, {len(dados) if dados else 0} registros obtidos")
             
             # Log detalhado dos tempos
-            logger.info(f"Tempos de execução - Navegador: {timer_navegador.get_duration():.2f}s, "
+            logger.info(f"[Scraper {self.scraper_id}] Tempos de execução - Navegador: {timer_navegador.get_duration():.2f}s, "
                        f"URL: {timer_url.get_duration():.2f}s, "
                        f"Formulário: {timer_formulario.get_duration():.2f}s, "
                        f"Pesquisa: {timer_pesquisa.get_duration():.2f}s, "
@@ -314,16 +453,10 @@ class TransparenciaScraper:
             return dados
             
         except Exception as e:
-            logger.error(f"Erro ao executar o scraper: {e}", exc_info=True)
+            logger.error(f"[Scraper {self.scraper_id}] Erro: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=str(e))
             
         finally:
-            if self.driver:
-                logger.info("Fechando o navegador...")
-                self.driver.quit()
-                
-            if self.download_dir:
-                logger.info("Limpando diretório de download...")
-                remover_diretorio(self.download_dir)
+            self.cleanup()
 
 

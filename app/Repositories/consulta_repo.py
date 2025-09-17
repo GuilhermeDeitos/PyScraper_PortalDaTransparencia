@@ -156,8 +156,6 @@ class ConsultaRepository:
             return {
                 "status": "concluido",
                 "dados_por_ano": consulta.get("dados_por_ano", {}),
-                "resumo_por_ano": consulta.get("resumo_por_ano", {}),
-                "resumo_consolidado": consulta.get("resumo_consolidado", {}),
                 "total_registros": consulta.get("total_registros", 0),
                 "anos_processados": sorted(list(consulta.get("anos_concluidos", set()))),
                 "erros_por_ano": consulta.get("erros_por_ano", {}),
@@ -185,7 +183,6 @@ class ConsultaRepository:
                 "anos_concluidos": sorted(list(consulta.get("anos_concluidos", set()))),
                 "anos_pendentes": sorted(list(consulta.get("anos_pendentes", set()))),
                 "dados_parciais_por_ano": consulta.get("dados_por_ano", {}),
-                "resumo_parcial_por_ano": consulta.get("resumo_por_ano", {}),
                 "total_registros_ate_agora": consulta.get("total_registros", 0),
                 "ultima_atualizacao": consulta.get("ultima_atualizacao"),
                 "erros_por_ano": consulta.get("erros_por_ano", {}),
