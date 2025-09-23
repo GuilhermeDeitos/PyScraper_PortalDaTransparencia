@@ -1,4 +1,5 @@
-from fastapi import APIRouter, Response, status, BackgroundTasks, HTTPException
+import asyncio
+from fastapi import APIRouter, Response,Request, status, BackgroundTasks, HTTPException
 from datetime import datetime
 from app.Models.Schema import ConsultaParams
 from app.Services.consulta_service import ConsultaService, get_system_status
@@ -14,7 +15,7 @@ consulta_service = ConsultaService()
 @router.post("/consultar", 
             summary="Consulta dados do Portal da Transparência organizados por ano",
             response_description="Dados de despesas do período solicitado organizados por ano")
-async def consultar(body: ConsultaParams, response: Response, background_tasks: BackgroundTasks):
+async def consultar(request: Request, body: ConsultaParams, response: Response, background_tasks: BackgroundTasks):
     """
     Consulta dados do Portal da Transparência organizando os resultados por ano.
     
@@ -22,7 +23,15 @@ async def consultar(body: ConsultaParams, response: Response, background_tasks: 
     Para consultas de múltiplos anos: inicia processamento assíncrono
     """
     try:
-        resultado = await consulta_service.processar_consulta(body, background_tasks)
+        # Verificar se o cliente ainda está conectado
+        if await request.is_disconnected():
+            raise HTTPException(status_code=499, detail="Cliente desconectado")
+        
+        # Executar a consulta com verificação periódica de conexão
+        resultado = await consulta_service.processar_consulta(
+            body,
+            background_tasks,
+        )
         
         # Define status code baseado no tipo de resultado
         if "id_consulta" in resultado:
@@ -36,6 +45,10 @@ async def consultar(body: ConsultaParams, response: Response, background_tasks: 
         response.status_code = status.HTTP_400_BAD_REQUEST
         return {"error": str(e)}
     except Exception as e:
+        if isinstance(e, HTTPException) and e.status_code == 499:
+            # Cliente desconectou, logar e retornar sem erro
+            logger.info("Cliente desconectou durante consulta")
+            return None
         logger.error(f"Erro interno: {str(e)}", exc_info=True)
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"error": f"Erro interno: {str(e)}"}
@@ -459,3 +472,43 @@ async def obter_resumo_performance(response: Response):
         logger.error(f"Erro ao obter resumo de performance: {e}")
         response.status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
         return {"error": f"Erro ao processar resumo: {str(e)}"}
+
+@router.post("/cancelar-consulta/{id_consulta}")
+async def cancelar_consulta(id_consulta: str):
+    """
+    Cancela uma consulta em andamento.
+    
+    Args:
+        id_consulta: ID da consulta a ser cancelada
+        
+    Returns:
+        Status da operação de cancelamento
+    """
+    try:
+        # Verificar se a consulta existe
+        consulta = consulta_service.consulta_repo.obter_consulta(id_consulta)
+        
+        if "error" in consulta:
+            raise HTTPException(status_code=404, detail="Consulta não encontrada")
+        
+        # Verificar se a consulta já foi concluída
+        if consulta["status"] in ["concluido", "erro"]:
+            return {
+                "status": "erro", 
+                "mensagem": f"Consulta já está no estado '{consulta['status']}', não pode ser cancelada"
+            }
+        
+        # Solicitar cancelamento
+        resultado = consulta_service.cancelar_consulta(id_consulta)
+        
+        return {
+            "status": "cancelamento_solicitado",
+            "mensagem": "A consulta será cancelada assim que possível",
+            "id_consulta": id_consulta
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao cancelar consulta {id_consulta}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))

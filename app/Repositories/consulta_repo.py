@@ -111,14 +111,42 @@ class ConsultaRepository:
                     "processado_em": str(datetime.datetime.now())
                 }
     
-    def finalizar_consulta(self, id_consulta: str):
+    def finalizar_consulta(self, id_consulta: str, status = "concluido"):
         """Marca uma consulta como concluída"""
+        
+        
+        # Recuperar consulta atual
+        consulta = self.obter_consulta(id_consulta)
+        
+        if "error" in consulta:
+            return consulta
+        
+        # Atualizar status
+        consulta["status"] = status
+        consulta["data_conclusao"] = str(datetime.datetime.now())
+        
+        # Calcular tempos totais
+        if "data_inicio" in consulta:
+            inicio = datetime.strptime(consulta["data_inicio"], "%Y-%m-%d %H:%M:%S")
+            fim = datetime.now()
+            tempo_total_segundos = (fim - inicio).total_seconds()
+            consulta["tempo_total_segundos"] = tempo_total_segundos
+            
+            # Adicionar estatísticas de conclusão
+            if status == "concluido":
+                # Cálculos adicionais para consultas concluídas normalmente
+                consulta["total_anos_processados"] = len(consulta.get("anos_concluidos", []))
+                consulta["conclusao"] = "consulta concluída com sucesso"
+            elif status == "cancelada":
+                # Informações específicas para cancelamento
+                consulta["conclusao"] = "consulta cancelada pelo usuário"
+            else:
+                # Para status de erro
+                consulta["conclusao"] = consulta.get("erro", "consulta finalizada com erro")
+                
         with self.lock:
             if id_consulta in self.consultas:
-                consulta = self.consultas[id_consulta]
-                consulta["status"] = "concluido"
-                consulta["finalizado_em"] = str(datetime.datetime.now())
-                
+                consulta = self.consultas[id_consulta]                
                 # Calcula estatísticas finais
                 anos_com_dados = sum(1 for ano_data in consulta["dados_por_ano"].values() 
                                    if ano_data.get("total_registros", 0) > 0)

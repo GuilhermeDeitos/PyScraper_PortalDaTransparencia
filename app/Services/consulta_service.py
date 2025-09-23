@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Any, Dict, List
 from fastapi import BackgroundTasks
 import threading
@@ -20,7 +21,7 @@ import weakref
 logger = logging.getLogger(__name__)
 
 # Configuração para controle de concorrência
-MAX_CONCURRENT_SCRAPERS = 3  # Máximo de scrapers simultâneos
+MAX_CONCURRENT_SCRAPERS = 8  # Máximo de scrapers simultâneos
 SCRAPER_SEMAPHORE = Semaphore(MAX_CONCURRENT_SCRAPERS)
 ano_locks = weakref.WeakValueDictionary()
 ano_locks_creation_lock = Lock()
@@ -42,6 +43,17 @@ def get_lock_for_ano(ano: int) -> Lock:
 class ConsultaService:
     def __init__(self):
         self.consulta_repo = ConsultaRepository()
+        self.consultas_canceladas = set()
+        
+    def cancelar_consulta(self, id_consulta):
+        """Marca uma consulta para cancelamento"""
+        logger.info(f"Marcando consulta {id_consulta} para cancelamento")
+        self.consultas_canceladas.add(id_consulta)
+        self.consulta_repo.atualizar_status_processando(
+            id_consulta, 
+            f"Cancelamento solicitado pelo usuário"
+        )
+        return {"status": "cancelamento_solicitado"}
         
     def _validar_dados_ano(self, dados: List[Dict[str, Any]], ano: int) -> List[Dict[str, Any]]:
         """
@@ -192,7 +204,7 @@ class ConsultaService:
                 
                 # Para um único ano, processa o ano completo
                 with SCRAPER_SEMAPHORE:
-                    resultado_ano = self._executar_scraper_com_retry(ano_inicio, mes_inicio, mes_fim)
+                    resultado_ano = self._executar_scraper_com_retry(ano_inicio, mes_inicio, mes_fim, id_consulta=id_consulta)
                 
                 fim_scraper = time.time()
                 
@@ -284,12 +296,26 @@ class ConsultaService:
             total_registros = 0
             tempo_scraping_total = 0.0
             
+            # Verificar se já foi cancelada antes de começar
+            if id_consulta in self.consultas_canceladas:
+                logger.info(f"[{thread_name}] Consulta {id_consulta} já estava marcada como cancelada, interrompendo")
+                self.consulta_repo.finalizar_consulta(id_consulta, status="cancelada")
+                return
+            
             # Gera todos os anos que devem ser processados
             anos_para_processar = list(range(ano_inicio, ano_fim + 1))
             
             logger.info(f"[{thread_name}] Iniciando processamento de {len(anos_para_processar)} anos para consulta {id_consulta}")
             
             for idx, ano in enumerate(anos_para_processar, 1):
+                # Verificar cancelamento antes de cada ano
+                if id_consulta in self.consultas_canceladas:
+                    logger.info(f"[{thread_name}] Consulta {id_consulta} foi cancelada, interrompendo processamento")
+                    self.consulta_repo.atualizar_status_processando(
+                        id_consulta, 
+                        f"Processamento cancelado pelo usuário após processar {idx-1} de {len(anos_para_processar)} anos"
+                    )
+                    break
                 # Determina o período para o ano atual
                 ano_lock = get_lock_for_ano(ano)
                 
@@ -337,7 +363,7 @@ class ConsultaService:
                     try:
                         # Executa o scraper para o ano específico com medição de tempo
                         inicio_scraper_ano = time.time()
-                        resultado_ano = self._executar_scraper_com_retry(ano, mes_inicial_ano, mes_final_ano)
+                        resultado_ano = self._executar_scraper_com_retry(ano, mes_inicial_ano, mes_final_ano, id_consulta=id_consulta)
                         fim_scraper_ano = time.time()
                         
                         tempo_scraper_ano = fim_scraper_ano - inicio_scraper_ano
@@ -394,8 +420,15 @@ class ConsultaService:
             
             tempo_total_final = time.time() - inicio_total
             
-            # Finaliza a consulta como concluída
-            self.consulta_repo.finalizar_consulta(id_consulta)
+            # Verificar se foi cancelado antes de finalizar
+            if id_consulta in self.consultas_canceladas:
+                logger.info(f"[{thread_name}] Finalizando consulta {id_consulta} como cancelada")
+                self.consulta_repo.finalizar_consulta(id_consulta, status="cancelada")
+                # Limpar a consulta da lista de canceladas
+                self.consultas_canceladas.remove(id_consulta)
+            else:
+                # Finaliza a consulta como concluída normalmente
+                self.consulta_repo.finalizar_consulta(id_consulta)
             
             # Registra métrica final da consulta completa
             metrica_final = performance_tracker.criar_metrica(
@@ -437,12 +470,15 @@ class ConsultaService:
             
             self.consulta_repo.registrar_erro_consulta(id_consulta, str(e))
     
-    def _executar_scraper_com_retry(self, ano, mes_inicio, mes_fim, max_retries=2):
+    def _executar_scraper_com_retry(self, ano, mes_inicio, mes_fim, max_retries=2, id_consulta=None):
         """Executa scraper com retry e validação dos dados"""
         last_exception = None
         thread_name = threading.current_thread().name
         
         for tentativa in range(max_retries + 1):
+            if id_consulta and id_consulta in self.consultas_canceladas:
+                logger.info(f"[{thread_name}] Pulando scraper para ano {ano} - consulta {id_consulta} cancelada")
+                raise Exception("Consulta cancelada pelo usuário")
             scraper_service = None
             try:
                 logger.debug(f"[{thread_name}] Criando scraper para ano {ano} (tentativa {tentativa + 1})")
