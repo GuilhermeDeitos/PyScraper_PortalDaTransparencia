@@ -1,6 +1,7 @@
 import datetime
 import threading
 import logging
+import time
 from typing import Dict, Any, List, Set, Tuple
 
 logger = logging.getLogger(__name__)
@@ -111,56 +112,33 @@ class ConsultaRepository:
                     "processado_em": str(datetime.datetime.now())
                 }
     
+    # Ajuste o método finalizar_consulta para garantir que o status esteja na raiz do objeto:
     def finalizar_consulta(self, id_consulta: str, status = "concluido"):
         """Marca uma consulta como concluída"""
-        
-        
-        # Recuperar consulta atual
-        consulta = self.obter_consulta(id_consulta)
-        
-        if "error" in consulta:
-            return consulta
-        
-        # Atualizar status
-        consulta["status"] = status
-        consulta["data_conclusao"] = str(datetime.datetime.now())
-        
-        # Calcular tempos totais
-        if "data_inicio" in consulta:
-            inicio = datetime.strptime(consulta["data_inicio"], "%Y-%m-%d %H:%M:%S")
-            fim = datetime.now()
-            tempo_total_segundos = (fim - inicio).total_seconds()
-            consulta["tempo_total_segundos"] = tempo_total_segundos
-            
-            # Adicionar estatísticas de conclusão
-            if status == "concluido":
-                # Cálculos adicionais para consultas concluídas normalmente
-                consulta["total_anos_processados"] = len(consulta.get("anos_concluidos", []))
-                consulta["conclusao"] = "consulta concluída com sucesso"
-            elif status == "cancelada":
-                # Informações específicas para cancelamento
-                consulta["conclusao"] = "consulta cancelada pelo usuário"
-            else:
-                # Para status de erro
-                consulta["conclusao"] = consulta.get("erro", "consulta finalizada com erro")
-                
         with self.lock:
-            if id_consulta in self.consultas:
-                consulta = self.consultas[id_consulta]                
-                # Calcula estatísticas finais
-                anos_com_dados = sum(1 for ano_data in consulta["dados_por_ano"].values() 
-                                   if ano_data.get("total_registros", 0) > 0)
-                anos_com_erro = len(consulta.get("erros_por_ano", {}))
-                
-                consulta["mensagem"] = (
-                    f"Consulta concluída. Total: {consulta['total_registros']} registros. "
-                    f"Anos processados: {anos_com_dados}. Anos com erro: {anos_com_erro}."
-                )
-                
-                # Gera resumo consolidado
-                consulta["resumo_consolidado"] = self._gerar_resumo_consolidado(consulta)
-                
-                logger.info(f"Consulta {id_consulta} concluída com sucesso")
+            # Recuperar consulta atual
+            consulta = self.consultas.get(id_consulta)
+            if not consulta:
+                logger.warning(f"Consulta {id_consulta} não encontrada para finalização")
+                return
+            
+            # Atualizar status
+            consulta["status"] = status
+            consulta["concluido_em"] = time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Verificar se há anos pendentes
+            anos_pendentes = consulta.get("anos_pendentes", set())
+            if anos_pendentes:
+                logger.warning(f"Consulta {id_consulta} finalizada com {len(anos_pendentes)} anos pendentes")
+                consulta["anos_pendentes"] = list(anos_pendentes)  # Converter set para lista para JSON
+            
+            # Gerar resumos
+            if status == "concluido":
+                try:
+                    logger.info(f"Consulta {id_consulta} concluída com sucesso")
+                    consulta["resumo"] = self._gerar_resumo_consolidado(consulta)
+                except Exception as e:
+                    logger.error(f"Erro ao gerar resumo para consulta {id_consulta}: {e}")
     
     def registrar_erro_consulta(self, id_consulta: str, erro: str):
         """Registra erro na consulta inteira"""
@@ -328,3 +306,24 @@ class ConsultaRepository:
             return float(valor_limpo)
         except:
             return 0.0
+    def adicionar_metadados_ano(self, id_consulta: str, ano: int, metadados: dict):
+        """
+        Adiciona metadados para um ano específico da consulta.
+        
+        Args:
+            id_consulta: ID único da consulta
+            ano: Ano para adicionar metadados
+            metadados: Dicionário com metadados a serem armazenados
+        """
+        consulta = self.consultas.get(id_consulta)
+        if not consulta:
+            return
+        
+        if "metadados_anos" not in consulta:
+            consulta["metadados_anos"] = {}
+        
+        if str(ano) not in consulta["metadados_anos"]:
+            consulta["metadados_anos"][str(ano)] = {}
+        
+        # Adiciona os novos metadados ao dicionário existente
+        consulta["metadados_anos"][str(ano)].update(metadados)

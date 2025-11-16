@@ -1401,3 +1401,5 @@ Stacktrace:
 2025-09-30T15:32:06.355501,/consultar,consulta_assincrona_ano,2015,2015,1,12,192.69649934768677,192.69649934768677,0.0,73,True,,cf8b2cc7-b34c-4f58-a9bf-4294f091dada,ScraperThread_0
 2025-09-30T15:33:38.985220,/consultar,consulta_assincrona_ano,2016,2016,1,9,92.6212203502655,92.6212203502655,0.0,54,True,,cf8b2cc7-b34c-4f58-a9bf-4294f091dada,ScraperThread_0
 2025-09-30T15:33:38.997114,/consultar,consulta_assincrona_final,2014,2016,4,9,379.59324312210083,379.5599684715271,0.0,206,True,,cf8b2cc7-b34c-4f58-a9bf-4294f091dada,ScraperThread_0
+2025-09-30T16:02:27.951137,/consultar,consulta_assincrona_final,2007,2016,1,12,0.10929322242736816,0.0,0.0,0,False,PerformanceTracker.criar_metrica() got an unexpected keyword argument 'fonte_dados',5e491608-3a9a-4a77-a5da-60aee768f3ae,ScraperThread_1
+2025-09-30T16:02:57.977725,/consultar,consulta_assincrona_final,2014,2016,4,9,94.95017433166504,0.0,0.0,0,False,PerformanceTracker.criar_metrica() got an unexpected keyword argument 'fonte_dados',6973c98a-3c71-47d2-95c8-e29e492c1587,ScraperThread_0
