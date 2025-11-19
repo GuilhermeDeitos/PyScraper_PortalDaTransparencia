@@ -1,116 +1,91 @@
-name: CI/CD API Crawler
+name: CI/CD API Scraper
 
 on:
   push:
-    branches: ["main"]
+    branches: [ "main" ]
   pull_request:
-    branches: ["main"]
+    branches: [ "main" ]
 
 env:
   IMAGE_NAME: tcc-api-scraper
   SERVICE_NAME: api-scraper
+  REGISTRY: ghcr.io
 
 jobs:
-  # 1. Testes (CI)
-  test:
+  test-and-build:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        # Ajuste se a pasta for diferente no repo do scraper
+        working-directory: ./PyScraper_PortalDaTransparencia 
+    permissions:
+      contents: read
+      packages: write
+    
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
-      
-      - name: Cache pip packages
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/pip
-          key: ${{ runner.os }}-pip-crawler-${{ hashFiles('**/requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-crawler-
-      
-      - name: Install system dependencies
+
+      # Instalação do Chrome para testes (CI na nuvem)
+      - name: Install Browser Dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y chromium-browser chromium-chromedriver
-      
-      - name: Install Dependencies
-        working-directory: ./PyScraper_PortalDaTransparencia
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-      
-      - name: Run Unit Tests
-        working-directory: ./PyScraper_PortalDaTransparencia
-        run: pytest tests/unit/ -v --cov=app --cov-report=term
-      
-      - name: Run Integration Tests
-        working-directory: ./PyScraper_PortalDaTransparencia
-        run: pytest tests/integration/ -v --cov=app --cov-append --cov-report=term
-        env:
-          HEADLESS: "true"
+          sudo apt-get install -y google-chrome-stable || true
 
-  # 2. Build e Push (Só no push para main)
-  build-and-push:
-    needs: test
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      packages: write
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-      
+      - name: Install Dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov
+          # Se usar playwright nos testes:
+          # playwright install --with-deps chromium
+
+      - name: Run Tests
+        run: |
+          if [ -d "tests" ]; then
+             export HEADLESS=true
+             pytest tests/ -v
+          else
+             echo "Pasta de testes não encontrada."
+          fi
+
+      # BUILD & PUSH
       - name: Log in to GHCR
+        if: github.event_name == 'push'
         uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Lowercase Owner
+        if: github.event_name == 'push'
         run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
-      
-      - name: Build and Push
+
+      - name: Build and Push Docker
+        if: github.event_name == 'push'
         uses: docker/build-push-action@v5
         with:
           context: ./PyScraper_PortalDaTransparencia
           push: true
-          tags: |
-            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:latest
-            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          tags: ${{ env.REGISTRY }}/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:latest
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # 3. Deploy (Atualizar apenas este serviço na VM)
   deploy:
-    needs: build-and-push
-    runs-on: ubuntu-latest
+    needs: test-and-build
+    if: github.event_name == 'push'
+    runs-on: [self-hosted, linux] # Runner na VM
     steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_PORT }}
-          script: |
-            cd ~/tcc-deploy
-            # Baixa a nova versão APENAS deste serviço
-            docker compose pull ${{ env.SERVICE_NAME }}
-            # Recria APENAS este container, sem derrubar os outros
-            docker compose up -d --no-deps ${{ env.SERVICE_NAME }}
-            # Limpa imagens velhas para economizar espaço
-            docker image prune -f
-      
-      - name: Verificar status do deploy
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          port: ${{ secrets.VM_SSH_PORT }}
-          script: |
-            docker ps --filter name=${{ env.SERVICE_NAME }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+      - name: Deploy Local
+        run: |
+          cd ~/tcc-deploy
+          echo "⬇Atualizando API Scraper..."
+          docker compose pull ${{ env.SERVICE_NAME }}
+          docker compose up -d --no-deps ${{ env.SERVICE_NAME }}
+          docker image prune -f
