@@ -1,258 +1,116 @@
-name: CI/CD TCC Production
+name: CI/CD API Crawler
 
 on:
   push:
-    branches: [ "main" ]
-    paths-ignore:
-      - '**.md'
+    branches: ["main"]
   pull_request:
-    branches: [ "main" ]
-    paths-ignore:
-      - '**.md'
+    branches: ["main"]
 
 env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME_FRONTEND: tcc-frontend
-  IMAGE_NAME_IPCA: tcc-api-ipca
-  IMAGE_NAME_SCRAPER: tcc-api-scraper
+  IMAGE_NAME: tcc-api-scraper
+  SERVICE_NAME: api-scraper
 
 jobs:
-  # ======================================================
-  # ESTÁGIO 1: DETECÇÃO DE MUDANÇAS
-  # ======================================================
-  changes:
+  # 1. Testes (CI)
+  test:
     runs-on: ubuntu-latest
-    outputs:
-      frontend: ${{ steps.filter.outputs.frontend }}
-      api_ipca: ${{ steps.filter.outputs.api_ipca }}
-      api_scraper: ${{ steps.filter.outputs.api_scraper }}
     steps:
       - uses: actions/checkout@v4
-      - uses: dorny/paths-filter@v3
-        id: filter
-        with:
-          filters: |
-            frontend:
-              - 'frontend/frontend/**'
-            api_ipca:
-              - 'apiIPCA/**'
-            api_scraper:
-              - 'api_crawler/PyScraper_PortalDaTransparencia/**'
-
-  # ======================================================
-  # ESTÁGIO 2: INTEGRAÇÃO CONTÍNUA (TESTES & LINT)
-  # ======================================================
-  
-  ci-frontend:
-    needs: changes
-    if: ${{ needs.changes.outputs.frontend == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./frontend/frontend
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-          cache-dependency-path: './frontend/frontend/package-lock.json'
       
-      - name: Install Dependencies
-        run: npm ci
-      
-      - name: Linting
-        run: npm run lint
-      
-      # Verifica se não há erros de tipagem no TypeScript
-      - name: Type Checking
-        run: npx tsc --noEmit
-      
-      # Verifica se o build de produção consegue ser gerado sem erros
-      - name: Build Verification
-        run: npm run build
-
-  ci-api-ipca:
-    needs: changes
-    if: ${{ needs.changes.outputs.api_ipca == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./apiIPCA
-    steps:
-      - uses: actions/checkout@v4
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
       
-      - name: Install Dependencies
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-          pip install pytest pytest-cov httpx
-      
-      - name: Run Unit & Integration Tests
-        # Roda testes se existirem, ignorando erros se a pasta não existir ainda
-        run: |
-          if [ -d "tests" ]; then
-            pytest tests/ -v
-          else
-            echo "Pasta de testes não encontrada, pulando..."
-          fi
-
-  ci-api-scraper:
-    needs: changes
-    if: ${{ needs.changes.outputs.api_scraper == 'true' }}
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./api_crawler/PyScraper_PortalDaTransparencia
-    steps:
-      - uses: actions/checkout@v4
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Cache pip packages
+        uses: actions/cache@v4
         with:
-          python-version: '3.11'
-          cache: 'pip'
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-crawler-${{ hashFiles('**/requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-crawler-
       
-      # Instalação do Chrome para testes do Selenium/Playwright
-      - name: Install Browser Dependencies
+      - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable || true
+          sudo apt-get install -y chromium-browser chromium-chromedriver
       
-      - name: Install Python Dependencies
+      - name: Install Dependencies
+        working-directory: ./PyScraper_PortalDaTransparencia
         run: |
-          pip install --upgrade pip
+          python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pytest pytest-cov
-          playwright install --with-deps chromium
+      
+      - name: Run Unit Tests
+        working-directory: ./PyScraper_PortalDaTransparencia
+        run: pytest tests/unit/ -v --cov=app --cov-report=term
+      
+      - name: Run Integration Tests
+        working-directory: ./PyScraper_PortalDaTransparencia
+        run: pytest tests/integration/ -v --cov=app --cov-append --cov-report=term
+        env:
+          HEADLESS: "true"
 
-      - name: Run Tests
-        run: |
-          if [ -d "tests" ]; then
-             # Define HEADLESS=true para testes em CI
-             export HEADLESS=true
-             pytest tests/ -v
-          else
-             echo "Pasta de testes não encontrada, pulando..."
-          fi
-
-  # ======================================================
-  # ESTÁGIO 3: BUILD & PUSH (SÓ NO BRANCH MAIN)
-  # ======================================================
+  # 2. Build e Push (Só no push para main)
   build-and-push:
-    needs: [changes, ci-frontend, ci-api-ipca, ci-api-scraper]
-    # Roda se for push na main E se a análise de mudanças detectou algo
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && (needs.changes.outputs.frontend == 'true' || needs.changes.outputs.api_ipca == 'true' || needs.changes.outputs.api_scraper == 'true') }}
+    needs: test
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
       packages: write
-    
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - service: frontend
-            context: ./frontend/frontend
-            image_name: tcc-frontend
-            should_run: ${{ needs.changes.outputs.frontend }}
-          
-          - service: api-ipca
-            context: ./apiIPCA
-            image_name: tcc-api-ipca
-            should_run: ${{ needs.changes.outputs.api_ipca }}
-
-          - service: api-scraper
-            context: ./api_crawler/PyScraper_PortalDaTransparencia
-            image_name: tcc-api-scraper
-            should_run: ${{ needs.changes.outputs.api_scraper }}
-
+      contents: read
     steps:
-      - name: Checkout repository
-        if: matrix.should_run == 'true'
-        uses: actions/checkout@v4
-
-      - name: Lowercase Repo Owner
-        if: matrix.should_run == 'true'
-        run: |
-          echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
-
+      - uses: actions/checkout@v4
+      
       - name: Log in to GHCR
-        if: matrix.should_run == 'true'
         uses: docker/login-action@v3
         with:
-          registry: ${{ env.REGISTRY }}
+          registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Set up Docker Buildx
-        if: matrix.should_run == 'true'
-        uses: docker/setup-buildx-action@v3
-
-      - name: Create .env for Frontend
-        if: matrix.service == 'frontend' && matrix.should_run == 'true'
-        run: |
-          echo "VITE_API_URL=/api" > ${{ matrix.context }}/.env.production
-
-      - name: Build and push
-        if: matrix.should_run == 'true'
+      
+      - name: Lowercase Owner
+        run: echo "OWNER_LC=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
+      
+      - name: Build and Push
         uses: docker/build-push-action@v5
         with:
-          context: ${{ matrix.context }}
+          context: ./PyScraper_PortalDaTransparencia
           push: true
-          tags: ${{ env.REGISTRY }}/${{ env.REPO_OWNER }}/${{ matrix.image_name }}:latest
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:latest
+            ghcr.io/${{ env.OWNER_LC }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # ======================================================
-  # ESTÁGIO 4: DEPLOY NA VM (SÓ NO BRANCH MAIN)
-  # ======================================================
+  # 3. Deploy (Atualizar apenas este serviço na VM)
   deploy:
     needs: build-and-push
-    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Lowercase Repo Owner
-        run: |
-          echo "REPO_OWNER=${GITHUB_REPOSITORY_OWNER,,}" >> ${GITHUB_ENV}
-
-      - name: Generate Production Compose
-        run: |
-          sed "s/\${GITHUB_REPOSITORY_OWNER}/${{ env.REPO_OWNER }}/g" docker-compose.prod.yml > docker-compose.yml
-
-      - name: Copy Config Files to Server
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.VM_HOST }}
-          username: ${{ secrets.VM_USER }}
-          key: ${{ secrets.VM_SSH_KEY }}
-          source: "docker-compose.yml,gateway_nginx.conf"
-          target: "~/tcc-deploy/"
-
-      - name: Execute Remote Deploy
+      - name: Deploy via SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.VM_HOST }}
           username: ${{ secrets.VM_USER }}
           key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT }}
           script: |
             cd ~/tcc-deploy
-            mkdir -p nginx-conf
-            mv gateway_nginx.conf nginx-conf/default.conf 2>/dev/null || true
-            
-            echo "Atualizando imagens..."
-            docker compose pull
-            
-            echo "Reiniciando containers..."
-            docker compose up -d --remove-orphans
-            
-            echo "Limpando imagens antigas..."
+            # Baixa a nova versão APENAS deste serviço
+            docker compose pull ${{ env.SERVICE_NAME }}
+            # Recria APENAS este container, sem derrubar os outros
+            docker compose up -d --no-deps ${{ env.SERVICE_NAME }}
+            # Limpa imagens velhas para economizar espaço
             docker image prune -f
+      
+      - name: Verificar status do deploy
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: ${{ secrets.VM_USER }}
+          key: ${{ secrets.VM_SSH_KEY }}
+          port: ${{ secrets.VM_SSH_PORT }}
+          script: |
+            docker ps --filter name=${{ env.SERVICE_NAME }} --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
