@@ -33,4 +33,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # 4. Copiar o restante do código (MUITO mais rápido, pois usa o cache da camada 2)
 COPY . .
 
+EXPOSE 8001
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
+    CMD curl -f http://localhost:8001/system-status || exit 1
+
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
