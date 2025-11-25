@@ -373,17 +373,22 @@ class TestConsultaRepositoryObterConsulta:
         return repo
     
     def test_obter_consulta_concluida(self, repo_com_cenarios):
-        """Testa obtenção de consulta concluída."""
+        """Testa obtenção de consulta concluída - SEM dados_por_ano."""
         # Act
         resultado = repo_com_cenarios.obter_consulta("concluida")
         
         # Assert
         assert resultado["status"] == "concluido"
-        assert "dados_por_ano" in resultado
         assert "total_registros" in resultado
         assert "anos_processados" in resultado
         assert "iniciado_em" in resultado
         assert "periodo_consulta" in resultado
+        assert "dados_ja_enviados" in resultado
+        assert resultado["dados_ja_enviados"] is True
+        
+        #PRINCIPAL: Dados NÃO devem estar presentes
+        assert "dados_por_ano" not in resultado
+        assert "dados" not in resultado
     
     def test_obter_consulta_processando(self, repo_com_cenarios):
         """Testa obtenção de consulta em processamento."""
@@ -705,5 +710,7 @@ class TestConsultaRepositoryIntegracao:
         assert consulta["status"] == "concluido"
         assert consulta["total_registros"] == 2
         assert len(consulta["anos_processados"]) == 2
-        assert "2022" in consulta["dados_por_ano"]
-        assert "2023" in consulta["dados_por_ano"]
+        
+        #PRINCIPAL: Dados NÃO devem estar no retorno final
+        assert "dados_por_ano" not in consulta
+        assert consulta["dados_ja_enviados"] is True
