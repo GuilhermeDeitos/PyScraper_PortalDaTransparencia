@@ -161,7 +161,6 @@ class ConsultaRepository:
         if consulta.get("status") == "concluido":
             return {
                 "status": "concluido",
-                "dados_por_ano": consulta.get("dados_por_ano", {}),
                 "total_registros": consulta.get("total_registros", 0),
                 "anos_processados": sorted(list(consulta.get("anos_concluidos", set()))),
                 "erros_por_ano": consulta.get("erros_por_ano", {}),
@@ -170,7 +169,8 @@ class ConsultaRepository:
                 "periodo_consulta": {
                     "mes_inicio": consulta.get("mes_inicio"),
                     "mes_fim": consulta.get("mes_fim")
-                }
+                },
+                "dados_ja_enviados": True
             }
         elif consulta.get("status") == "erro":
             return {
