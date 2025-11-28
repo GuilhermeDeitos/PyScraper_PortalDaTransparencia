@@ -281,7 +281,6 @@ class TestConsultaRepositoryRegistrarErro:
         assert consulta["erro_geral"] == mensagem_erro
         assert "erro_em" in consulta
 
-
 class TestConsultaRepositoryFinalizarConsulta:
     """Testes para o método finalizar_consulta."""
     
@@ -292,7 +291,7 @@ class TestConsultaRepositoryFinalizarConsulta:
         
         dados = [
             {
-                "UNIDADE_ORCAMENTARIA": "UEL",
+                "UNIDADE_ORÇAMENTÁRIA": "UEL",
                 "ORÇAMENTO_INICIAL___LOA_(R$)": "1.000.000,00",
                 "EMPENHADO_(R$)_ATE_MES": "500.000,00"
             }
@@ -329,18 +328,64 @@ class TestConsultaRepositoryFinalizarConsulta:
         assert consulta["status"] == "cancelada"
     
     def test_finalizar_consulta_com_anos_pendentes(self, repo_com_dados):
-        """Testa finalização com anos ainda pendentes."""
+        """Testa que finalização NÃO ocorre com anos pendentes."""
         # Arrange
         id_consulta = "test_001"
         repo_com_dados.consultas[id_consulta]["anos_pendentes"].add(2024)
         
+        # Status inicial
+        status_inicial = repo_com_dados.consultas[id_consulta]["status"]
+        
         # Act
         repo_com_dados.finalizar_consulta(id_consulta, status="concluido")
         
-        # Assert
+        # Assert - NÃO deve finalizar
         consulta = repo_com_dados.consultas[id_consulta]
-        assert "anos_pendentes" in consulta
-        assert isinstance(consulta["anos_pendentes"], list)  # Convertido para lista
+        assert consulta["status"] == status_inicial  # Status não mudou
+        assert "concluido_em" not in consulta  # Não foi marcado como concluído
+        assert 2024 in consulta["anos_pendentes"]  # Ano ainda está pendente
+    
+    def test_finalizar_consulta_sem_dados_completos(self, repo_com_dados):
+        """Testa que finalização NÃO ocorre se faltam dados de anos."""
+        # Arrange
+        id_consulta = "test_001"
+        
+        # Adicionar mais anos como concluídos mas SEM dados
+        repo_com_dados.consultas[id_consulta]["anos_concluidos"].add(2024)
+        # dados_por_ano tem apenas 2023, mas anos_concluidos tem 2023 e 2024
+        
+        status_inicial = repo_com_dados.consultas[id_consulta]["status"]
+        
+        # Act
+        repo_com_dados.finalizar_consulta(id_consulta, status="concluido")
+        
+        # Assert - NÃO deve finalizar
+        consulta = repo_com_dados.consultas[id_consulta]
+        assert consulta["status"] == status_inicial  # Status não mudou
+        assert "concluido_em" not in consulta  # Não foi marcado como concluído
+    
+    def test_finalizar_consulta_todos_anos_processados(self, repo_com_dados):
+        """Testa finalização quando TODOS os anos foram processados."""
+        # Arrange
+        id_consulta = "test_001"
+        
+        # Garantir que anos_pendentes está vazio e dados_por_ano tem todos os anos
+        repo_com_dados.consultas[id_consulta]["anos_pendentes"] = set()
+        
+        # Verificar que temos dados para todos os anos concluídos
+        anos_concluidos = repo_com_dados.consultas[id_consulta]["anos_concluidos"]
+        dados_por_ano = repo_com_dados.consultas[id_consulta]["dados_por_ano"]
+        
+        assert len(dados_por_ano) == len(anos_concluidos), "Deve ter dados para todos os anos"
+        
+        # Act
+        repo_com_dados.finalizar_consulta(id_consulta, status="concluido")
+        
+        # Assert - DEVE finalizar
+        consulta = repo_com_dados.consultas[id_consulta]
+        assert consulta["status"] == "concluido"
+        assert "concluido_em" in consulta
+        assert "resumo" in consulta
     
     def test_finalizar_consulta_inexistente(self, repo_com_dados):
         """Testa finalização de consulta inexistente."""
@@ -349,6 +394,79 @@ class TestConsultaRepositoryFinalizarConsulta:
         
         # Assert
         assert "inexistente" not in repo_com_dados.consultas
+
+
+class TestConsultaRepositoryObterConsulta:
+    """Testes para o método obter_consulta."""
+    
+    @pytest.fixture
+    def repo_com_cenarios(self):
+        repo = ConsultaRepository()
+        
+        # Consulta concluída
+        repo.iniciar_consulta("concluida", (2023, 2023), 1, 12)
+        repo.adicionar_resultados_ano("concluida", 2023, [{"teste": "dados"}], 1, 12)
+        repo.finalizar_consulta("concluida", status="concluido")
+        
+        # Consulta processando
+        repo.iniciar_consulta("processando", (2023, 2023), 1, 12)
+        
+        # Consulta com erro
+        repo.iniciar_consulta("erro", (2023, 2023), 1, 12)
+        repo.registrar_erro_consulta("erro", "Erro simulado")
+        
+        return repo
+    
+    def test_obter_consulta_concluida(self, repo_com_cenarios):
+        """Testa obtenção de consulta concluída - SEM dados_por_ano."""
+        # Act
+        resultado = repo_com_cenarios.obter_consulta("concluida")
+        
+        # Assert
+        assert resultado["status"] == "concluido"
+        assert "total_registros" in resultado
+        assert "anos_processados" in resultado
+        assert "iniciado_em" in resultado
+        assert "periodo_consulta" in resultado
+        assert "dados_ja_enviados" in resultado
+        assert resultado["dados_ja_enviados"] is True
+        
+        # PRINCIPAL: Dados NÃO devem estar presentes
+        assert "dados_por_ano" not in resultado
+        assert "dados" not in resultado
+    
+    def test_obter_consulta_processando(self, repo_com_cenarios):
+        """Testa obtenção de consulta em processamento."""
+        # Act
+        resultado = repo_com_cenarios.obter_consulta("processando")
+        
+        # Assert
+        assert resultado["status"] == "processando"
+        assert "mensagem" in resultado
+        assert "anos_concluidos" in resultado
+        assert "anos_pendentes" in resultado
+        assert "dados_parciais_por_ano" in resultado
+        assert "total_registros_ate_agora" in resultado
+    
+    def test_obter_consulta_com_erro(self, repo_com_cenarios):
+        """Testa obtenção de consulta com erro."""
+        # Act
+        resultado = repo_com_cenarios.obter_consulta("erro")
+        
+        # Assert
+        assert resultado["status"] == "erro"
+        assert "mensagem" in resultado
+        assert "erro_geral" in resultado
+        assert "erro_em" in resultado
+    
+    def test_obter_consulta_inexistente(self, repo_com_cenarios):
+        """Testa obtenção de consulta que não existe."""
+        # Act
+        resultado = repo_com_cenarios.obter_consulta("inexistente")
+        
+        # Assert
+        assert "error" in resultado
+        assert resultado["error"] == "Consulta não encontrada"
 
 
 class TestConsultaRepositoryObterConsulta:
@@ -520,6 +638,7 @@ class TestConsultaRepositoryGerarResumo:
         assert "valores_consolidados" in resumo
         assert "distribuicao_por_ano" in resumo
         assert resumo["periodo_total"]["anos_abrangidos"] == 2
+
 
 
 class TestConsultaRepositoryConverterValor:
