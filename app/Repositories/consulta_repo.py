@@ -144,14 +144,10 @@ class ConsultaRepository:
                 )
                 return
             
-            # Aguardar 2 segundos antes de marcar como concluído
-            # para dar tempo do frontend processar todos os eventos
-            import time
+            
             logger.info(
-                f"Consulta {id_consulta}: Todos os dados prontos. "
-                "Aguardando 2s antes de finalizar..."
+                f"Consulta {id_consulta}: Todos os dados prontos. Finalizando..."
             )
-            time.sleep(2)
             
             # Atualizar status
             consulta["status"] = status
