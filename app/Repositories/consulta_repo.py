@@ -116,7 +116,6 @@ class ConsultaRepository:
     def finalizar_consulta(self, id_consulta: str, status: str = "concluido"):
         """Marca uma consulta como concluída"""
         with self.lock:
-            # Recuperar consulta atual
             consulta = self.consultas.get(id_consulta)
             if not consulta:
                 logger.warning(f"Consulta {id_consulta} não encontrada para finalização")
@@ -131,7 +130,6 @@ class ConsultaRepository:
                     f"Consulta {id_consulta} tem {len(anos_pendentes)} anos pendentes: {anos_pendentes}. "
                     "Não finalizando ainda."
                 )
-                # NÃO finalizar se ainda há anos pendentes
                 return
             
             # Verificar se dados_por_ano contém TODOS os anos esperados
@@ -145,6 +143,15 @@ class ConsultaRepository:
                     f"mas apenas {total_anos_com_dados} têm dados. Aguardando..."
                 )
                 return
+            
+            # Aguardar 2 segundos antes de marcar como concluído
+            # para dar tempo do frontend processar todos os eventos
+            import time
+            logger.info(
+                f"Consulta {id_consulta}: Todos os dados prontos. "
+                "Aguardando 2s antes de finalizar..."
+            )
+            time.sleep(2)
             
             # Atualizar status
             consulta["status"] = status
@@ -160,7 +167,7 @@ class ConsultaRepository:
                     consulta["resumo"] = self._gerar_resumo_consolidado(consulta)
                 except Exception as e:
                     logger.error(f"Erro ao gerar resumo para consulta {id_consulta}: {e}")
-    
+                    
     def registrar_erro_consulta(self, id_consulta: str, erro: str):
         """Registra erro na consulta inteira"""
         with self.lock:
