@@ -113,7 +113,7 @@ class ConsultaRepository:
                 }
     
     # Ajuste o método finalizar_consulta para garantir que o status esteja na raiz do objeto:
-    def finalizar_consulta(self, id_consulta: str, status = "concluido"):
+    def finalizar_consulta(self, id_consulta: str, status: str = "concluido"):
         """Marca uma consulta como concluída"""
         with self.lock:
             # Recuperar consulta atual
@@ -122,20 +122,41 @@ class ConsultaRepository:
                 logger.warning(f"Consulta {id_consulta} não encontrada para finalização")
                 return
             
+            # Verificar se TODOS os anos foram realmente processados
+            anos_concluidos = consulta.get("anos_concluidos", set())
+            anos_pendentes = consulta.get("anos_pendentes", set())
+            
+            if anos_pendentes:
+                logger.warning(
+                    f"Consulta {id_consulta} tem {len(anos_pendentes)} anos pendentes: {anos_pendentes}. "
+                    "Não finalizando ainda."
+                )
+                # NÃO finalizar se ainda há anos pendentes
+                return
+            
+            # Verificar se dados_por_ano contém TODOS os anos esperados
+            dados_por_ano = consulta.get("dados_por_ano", {})
+            total_anos_esperados = len(anos_concluidos)
+            total_anos_com_dados = len(dados_por_ano)
+            
+            if total_anos_com_dados < total_anos_esperados:
+                logger.warning(
+                    f"Consulta {id_consulta}: Esperados {total_anos_esperados} anos, "
+                    f"mas apenas {total_anos_com_dados} têm dados. Aguardando..."
+                )
+                return
+            
             # Atualizar status
             consulta["status"] = status
             consulta["concluido_em"] = time.strftime("%Y-%m-%d %H:%M:%S")
             
-            # Verificar se há anos pendentes
-            anos_pendentes = consulta.get("anos_pendentes", set())
-            if anos_pendentes:
-                logger.warning(f"Consulta {id_consulta} finalizada com {len(anos_pendentes)} anos pendentes")
-                consulta["anos_pendentes"] = list(anos_pendentes)  # Converter set para lista para JSON
-            
             # Gerar resumos
             if status == "concluido":
                 try:
-                    logger.info(f"Consulta {id_consulta} concluída com sucesso")
+                    logger.info(
+                        f"Consulta {id_consulta} concluída com sucesso. "
+                        f"Total de {len(anos_concluidos)} anos processados"
+                    )
                     consulta["resumo"] = self._gerar_resumo_consolidado(consulta)
                 except Exception as e:
                     logger.error(f"Erro ao gerar resumo para consulta {id_consulta}: {e}")

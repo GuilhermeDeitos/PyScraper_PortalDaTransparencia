@@ -337,8 +337,27 @@ class ConsultaService:
         if id_consulta in self.consultas_canceladas:
             self._finalizar_como_cancelada(id_consulta)
         else:
-            self.consulta_repo.finalizar_consulta(id_consulta)
-            logger.info(f"Consulta {id_consulta} concluída em {tempo_total:.2f}s")
+            # Obter informações da consulta antes de finalizar
+            consulta_info = self.consulta_repo.obter_consulta(id_consulta)
+            
+            anos_concluidos = consulta_info.get("anos_concluidos", [])
+            anos_pendentes = consulta_info.get("anos_pendentes", [])
+            
+            logger.info(
+                f"Finalizando consulta {id_consulta}: "
+                f"{len(anos_concluidos)} anos concluídos, "
+                f"{len(anos_pendentes)} anos pendentes, "
+                f"tempo total: {tempo_total:.2f}s"
+            )
+            
+            # Só finalizar se não houver anos pendentes
+            if not anos_pendentes:
+                self.consulta_repo.finalizar_consulta(id_consulta)
+                logger.info(f"Consulta {id_consulta} finalizada com sucesso")
+            else:
+                logger.warning(
+                    f"Consulta {id_consulta} NÃO finalizada - ainda há {len(anos_pendentes)} anos pendentes"
+                )
     
     def cancelar_consulta(self, id_consulta: str):
         """Marca consulta para cancelamento."""
