@@ -512,3 +512,50 @@ async def cancelar_consulta(id_consulta: str):
     except Exception as e:
         logger.error(f"Erro ao cancelar consulta {id_consulta}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+    
+@router.get("/chrome-info")
+async def chrome_info():
+    """Retorna informações sobre Chrome e ChromeDriver instalados."""
+    import subprocess
+    import os
+    
+    info = {
+        "chrome_installed": False,
+        "chrome_version": None,
+        "chrome_path": None,
+        "chromedriver_installed": False,
+        "chromedriver_version": None,
+        "chromedriver_path": None,
+        "selenium_version": None
+    }
+    
+    # Verificar Chrome
+    chrome_bin = os.getenv('CHROME_BIN', '/usr/bin/google-chrome')
+    if os.path.exists(chrome_bin):
+        info["chrome_installed"] = True
+        info["chrome_path"] = chrome_bin
+        try:
+            result = subprocess.run([chrome_bin, '--version'], capture_output=True, text=True)
+            info["chrome_version"] = result.stdout.strip()
+        except:
+            pass
+    
+    # Verificar ChromeDriver
+    chromedriver_bin = os.getenv('CHROMEDRIVER_BIN', '/usr/local/bin/chromedriver')
+    if os.path.exists(chromedriver_bin):
+        info["chromedriver_installed"] = True
+        info["chromedriver_path"] = chromedriver_bin
+        try:
+            result = subprocess.run([chromedriver_bin, '--version'], capture_output=True, text=True)
+            info["chromedriver_version"] = result.stdout.strip()
+        except:
+            pass
+    
+    # Versão do Selenium
+    try:
+        import selenium
+        info["selenium_version"] = selenium.__version__
+    except:
+        pass
+    
+    return info
